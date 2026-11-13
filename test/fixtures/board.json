@@ -1,0 +1,35 @@
+{
+  "item": { "id": "1000000000000000001", "name": "Demo Board", "projectId": "1000000000000000000", "position": 65536, "defaultCardType": "project" },
+  "included": {
+    "projects": [{ "id": "1000000000000000000", "name": "Demo Project" }],
+    "lists": [
+      { "id": "2000000000000000002", "boardId": "1000000000000000001", "name": "Doing", "type": "active", "position": 131072 },
+      { "id": "2000000000000000001", "boardId": "1000000000000000001", "name": "Todo", "type": "active", "position": 65536 },
+      { "id": "2000000000000000003", "boardId": "1000000000000000001", "name": "Done", "type": "closed", "position": 196608 },
+      { "id": "2000000000000000009", "boardId": "1000000000000000001", "name": null, "type": "archive", "position": null }
+    ],
+    "labels": [
+      { "id": "3000000000000000001", "boardId": "1000000000000000001", "name": "bug", "color": "berry-red", "position": 65536 },
+      { "id": "3000000000000000002", "boardId": "1000000000000000001", "name": null, "color": "lagoon-blue", "position": 131072 }
+    ],
+    "cards": [
+      { "id": "4000000000000000002", "listId": "2000000000000000001", "boardId": "1000000000000000001", "name": "Second", "position": 131072, "description": "Fix the login timeout bug on mobile", "dueDate": null, "isDueCompleted": false, "commentsTotal": 0, "isClosed": false, "type": "project", "createdAt": "2026-01-02T00:00:00Z" },
+      { "id": "4000000000000000001", "listId": "2000000000000000001", "boardId": "1000000000000000001", "name": "First card", "position": 65536, "description": null, "dueDate": "2026-12-01T12:00:00.000Z", "isDueCompleted": false, "commentsTotal": 3, "isClosed": false, "type": "project", "createdAt": "2026-01-01T00:00:00Z" },
+      { "id": "4000000000000000003", "listId": "2000000000000000003", "boardId": "1000000000000000001", "name": "Shipped LOGIN", "position": 65536, "description": "", "dueDate": null, "isDueCompleted": false, "commentsTotal": 0, "isClosed": true, "type": "story" },
+      { "id": "4000000000000000009", "listId": "2000000000000000009", "boardId": "1000000000000000001", "name": "Old login thing", "position": 65536, "description": null, "dueDate": null, "isDueCompleted": false, "commentsTotal": 0, "isClosed": true, "type": "project" }
+    ],
+    "cardLabels": [
+      { "id": "5000000000000000001", "cardId": "4000000000000000001", "labelId": "3000000000000000001" },
+      { "id": "5000000000000000002", "cardId": "4000000000000000001", "labelId": "3000000000000000002" }
+    ],
+    "taskLists": [
+      { "id": "6000000000000000001", "cardId": "4000000000000000001", "name": "TODO", "position": 65536 }
+    ],
+    "tasks": [
+      { "id": "7000000000000000001", "taskListId": "6000000000000000001", "name": "a", "isCompleted": true, "position": 65536 },
+      { "id": "7000000000000000002", "taskListId": "6000000000000000001", "name": "b", "isCompleted": false, "position": 131072 },
+      { "id": "7000000000000000003", "taskListId": "6000000000000000001", "name": "c", "isCompleted": false, "position": 196608 }
+    ],
+    "users": [{ "id": "9000000000000000001", "name": "Alex Example", "username": "alex" }]
+  }
+}

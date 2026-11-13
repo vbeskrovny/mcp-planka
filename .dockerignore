@@ -1,0 +1,8 @@
+.planka
+.planka-*
+.env
+node_modules
+dist
+.git
+test
+*.log

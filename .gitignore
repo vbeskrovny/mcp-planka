@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.planka
+.planka-*
+.env
+*.log
+mirror_key
+mirror_key.pub
+*.pem
+id_*

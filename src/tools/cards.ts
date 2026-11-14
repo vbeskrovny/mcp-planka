@@ -50,6 +50,7 @@ export function registerCardTools(server: McpServer, client: PlankaClient) {
       title: "Update card",
       description:
         "Update card fields. Pass dueDate: null / description: null to clear them. " +
+        "coverAttachmentId sets the card's cover image (an image attachment of this card); null removes the cover. " +
         "To close a card, move it to a list of type \"closed\" with planka_move_card.",
       inputSchema: {
         cardId: id("Card ID"),
@@ -58,6 +59,7 @@ export function registerCardTools(server: McpServer, client: PlankaClient) {
         dueDate: isoDate.nullable().optional(),
         isDueCompleted: z.boolean().optional(),
         type: z.enum(CARD_TYPES).optional(),
+        coverAttachmentId: id("Attachment ID to show as the card cover").nullable().optional(),
       },
       annotations: W,
     },
@@ -65,7 +67,13 @@ export function registerCardTools(server: McpServer, client: PlankaClient) {
       const body = Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined));
       if (!Object.keys(body).length) throw new Error("Nothing to update");
       const { item } = await client.patch(`/cards/${cardId}`, body);
-      return { ...summary(item), description: item.description, dueDate: item.dueDate, isDueCompleted: item.isDueCompleted };
+      return {
+        ...summary(item),
+        description: item.description,
+        dueDate: item.dueDate,
+        isDueCompleted: item.isDueCompleted,
+        coverAttachmentId: item.coverAttachmentId ?? null,
+      };
     }),
   );
 

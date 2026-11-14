@@ -2,16 +2,18 @@
 # Register mcp-planka with Claude Code (default: user scope = available in all projects).
 #
 # Usage: ./register.sh [--mode auto|node|docker|podman] [--yes] [--name planka]
-#                      [--scope user|local|project] [--config /path/.planka] [--dry-run]
+#                      [--scope user|local|project] [--config /path/.planka] [--files-dir DIR] [--dry-run]
 #   --mode     how to run the server; auto (default) tests what works here, recommends one and asks
 #   --yes      take the recommended mode without asking (also used when there is no terminal)
 #   --config   use a specific .planka file (e.g. another user's API key); default: .planka in the repo
+#   --files-dir  folder the attachment tools may read/write (PLANKA_FILES_DIR); mounted as /files in containers
 #   --dry-run  print what would be done, change nothing
 set -euo pipefail
 
 NAME="planka"
 SCOPE="user"
 CONFIG=""
+FILES_DIR=""
 MODE="auto"
 YES=0
 DRY=0
@@ -24,8 +26,9 @@ while [[ $# -gt 0 ]]; do
     --name)    NAME="$2"; shift 2 ;;
     --scope)   SCOPE="$2"; shift 2 ;;
     --config)  CONFIG="$2"; shift 2 ;;
+    --files-dir) FILES_DIR="$2"; shift 2 ;;
     --dry-run) DRY=1; shift ;;
-    -h|--help) sed -n '2,9p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -52,6 +55,11 @@ if [[ -n "$CONFIG" ]]; then
   if (( (8#$perms & 8#077) != 0 )); then
     echo "warning: $CONFIG ($perms) is readable by other users; consider: chmod 600 $CONFIG"
   fi
+fi
+
+if [[ -n "$FILES_DIR" ]]; then
+  [[ -d "$FILES_DIR" ]] || die "--files-dir: not a directory: $FILES_DIR"
+  FILES_DIR="$(cd "$FILES_DIR" && pwd -P)"
 fi
 
 # --- Detect what works on this host -----------------------------------------
@@ -144,6 +152,7 @@ if [[ "$MODE" == "node" ]]; then
   CHECK=(env ${CONFIG:+PLANKA_CONFIG="$CONFIG"} node "$ROOT/dist/check.js")
   SERVER=(node "$ENTRY")
   ENV_ARGS=(); [[ -n "$CONFIG" ]] && ENV_ARGS=(-e "PLANKA_CONFIG=$CONFIG")
+  [[ -n "$FILES_DIR" ]] && ENV_ARGS+=(-e "PLANKA_FILES_DIR=$FILES_DIR")
 else
   RT="$MODE"
   echo "Building image $IMAGE with $RT..."
@@ -151,6 +160,10 @@ else
   [[ -n "$CONFIG" ]] || die "$RT mode needs a .planka file (env-only config isn't passed into the container)"
   VOL_OPTS="ro"; [[ "$RT" == "podman" ]] && VOL_OPTS="ro,z"   # z: SELinux relabel for Podman hosts
   RUN_ARGS=(run -i --rm --pull=never -v "$CONFIG:/app/.planka:$VOL_OPTS" -v mcp-planka-state:/data)
+  if [[ -n "$FILES_DIR" ]]; then
+    FILES_OPTS="rw"; [[ "$RT" == "podman" ]] && FILES_OPTS="rw,z"
+    RUN_ARGS+=(-v "$FILES_DIR:/files:$FILES_OPTS" -e PLANKA_FILES_DIR=/files)
+  fi
   CHECK=("$RT" "${RUN_ARGS[@]}" --entrypoint node "$IMAGE" dist/check.js)
   SERVER=("$RT" "${RUN_ARGS[@]}" "$IMAGE")
   ENV_ARGS=()

@@ -25,7 +25,7 @@ const boardResp = {
 };
 
 describe("tool registry", () => {
-  it("registers all v1 tools with correct annotations", async () => {
+  it("registers all tools with correct annotations", async () => {
     const { client } = await connect(fakePlanka({}).client);
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
@@ -40,6 +40,8 @@ describe("tool registry", () => {
         "planka_check_updates", "planka_sync_board_members",
         "planka_find_project", "planka_create_project", "planka_create_board", "planka_update_project",
         "planka_delete_list", "planka_delete_board", "planka_delete_project",
+        "planka_list_attachments", "planka_add_attachment", "planka_rename_attachment",
+        "planka_delete_attachment", "planka_download_attachment",
       ].sort(),
     );
     for (const t of tools) {

@@ -97,6 +97,23 @@ export function formatBoard(resp: Rec, opts: FormatBoardOptions = {}) {
   });
 }
 
+/** Compact attachment: file (url, mimeType, size, image size) or link (url). */
+export function formatAttachment(a: Rec, coverAttachmentId?: string | null, users?: Map<string, string>) {
+  const d: Rec = a.data ?? {};
+  return compact({
+    id: a.id,
+    name: a.name,
+    type: a.type,
+    url: d.url,
+    mimeType: a.type === "file" ? d.mimeType ?? undefined : undefined,
+    size: a.type === "file" ? d.size ?? d.sizeInBytes ?? undefined : undefined,
+    image: d.image?.width ? `${d.image.width}x${d.image.height}` : undefined,
+    isCover: coverAttachmentId ? a.id === coverAttachmentId : undefined,
+    creator: users?.get(a.creatorUserId),
+    createdAt: a.createdAt,
+  });
+}
+
 export function formatCard(cardResp: Rec, commentsResp?: Rec, boardResp?: Rec) {
   const c = cardResp.item;
   const inc = cardResp.included ?? {};
@@ -123,6 +140,9 @@ export function formatCard(cardResp: Rec, commentsResp?: Rec, boardResp?: Rec) {
     isDueCompleted: c.dueDate ? c.isDueCompleted : undefined,
     isClosed: c.isClosed,
     creator: users.get(c.creatorUserId),
+    attachments: [...(inc.attachments ?? [])]
+      .sort((a: Rec, b: Rec) => String(a.createdAt).localeCompare(String(b.createdAt)))
+      .map((a: Rec) => formatAttachment(a, c.coverAttachmentId, users)),
     taskLists: [...(inc.taskLists ?? [])].sort(byPos).map((tl: Rec) => ({
       id: tl.id,
       name: tl.name,

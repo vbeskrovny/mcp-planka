@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { PlankaClient } from "./client.js";
+import { registerAttachmentTools } from "./tools/attachments.js";
 import { registerBrowseTools } from "./tools/browse.js";
 import { registerCardTools } from "./tools/cards.js";
 import { registerCommentTools } from "./tools/comments.js";
@@ -18,7 +19,7 @@ export const SERVER_VERSION = "0.1.0";
 export function createServer(
   client: PlankaClient,
   tracker = new UpdateTracker(client),
-  opts: { managers?: string[]; instructions?: string } = {},
+  opts: { managers?: string[]; instructions?: string; filesDir?: string } = {},
 ): McpServer {
   const server = new McpServer(
     { name: SERVER_NAME, version: SERVER_VERSION },
@@ -34,5 +35,6 @@ export function createServer(
   registerUpdateTools(server, tracker);
   registerMemberTools(server, client);
   registerDeleteTools(server, client);
+  registerAttachmentTools(server, client, { filesDir: opts.filesDir });
   return server;
 }

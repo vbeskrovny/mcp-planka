@@ -26,6 +26,7 @@ KEY=<api key>
 | `PLANKA_CONFIG` | Path to a `.planka` file |
 | `PLANKA_MANAGERS` / `MANAGERS=` in `.planka` | Comma-separated users (id, username, email or name). They become editors of every board `planka_create_project` / `planka_create_board` creates. Projects are always private with a single owner (the API-key user), so they don't become project managers there. No confirmation needed |
 | `PLANKA_INSTRUCTIONS` / `INSTRUCTIONS=` in `.planka` | Workflow rules the server sends to the client as MCP *instructions* when it connects. They cover tracking work on the project board matching the folder name, comments without a signature, and preview plus confirmation before deletes. Unset: the built-in rules (`src/instructions.ts`). `off`: none. A file path: that file's text |
+| `PLANKA_FILES_DIR` / `FILES_DIR=` in `.planka` | If set, the attachment tools only read and write local files inside this directory. Relative paths start there. Unset: any path the server process can access, relative to its working directory |
 | `PLANKA_STATE_DIR` | Where update-tracking snapshots are stored (default `~/.mcp-planka`) |
 | `PLANKA_BACKLOG_PATTERN` | Regex (case-insensitive) that marks a list as a backlog (default `backlog`) |
 | `PLANKA_WATCH_INTERVAL` | Poll seconds for the watcher (default 60, min 10) |
@@ -54,6 +55,7 @@ The script then checks the API key against the server, replaces any existing reg
 ./register.sh --yes                                      # take the recommendation without asking
 ./register.sh --mode docker                              # pick a mode yourself
 ./register.sh --name planka-me --config ~/.planka-me     # second identity (another user's API key)
+./register.sh --files-dir ~/planka-files                 # folder for attachment uploads/downloads (mounted as /files in containers)
 ./register.sh --dry-run                                  # show what would happen
 ```
 ```powershell
@@ -132,7 +134,8 @@ Check that it works by asking the assistant to "call planka_whoami". To test the
 | Browse | `planka_whoami`, `planka_list_projects`, `planka_get_board`, `planka_get_card`, `planka_search_cards` | Read-only. The output is compact JSON |
 | Projects | `planka_find_project`, `planka_create_project`, `planka_update_project`, `planka_create_board` | Find matches names case-insensitively. Create **always** makes a **private** project with an **UPPERCASE** name (`mcp-planka` → `MCP-PLANKA`; there is no shared option; verified: other users, admins included, don't see it). The `MANAGERS` from the config become editors of its board automatically. `update_project` renames a project (also to UPPERCASE), changes or clears its description, and toggles the hide option. It also sets up a default board: Backlog / In Progress / Testing / Done. `create_board` has `addProjectManagers: true` to make the project's managers editors (by default only the creator is a member) |
 | Lists | `planka_create_list`, `planka_update_list`, `planka_move_list` | `type`: `active` / `closed`. `move_list` moves a list and its cards to another board, also in another project (see below) |
-| Cards | `planka_create_card`, `planka_update_card`, `planka_move_card`, `planka_delete_card` | To close a card, move it into a `closed` list |
+| Cards | `planka_create_card`, `planka_update_card`, `planka_move_card`, `planka_delete_card` | To close a card, move it into a `closed` list. `update_card` sets or clears the cover image (`coverAttachmentId`) |
+| Attachments | `planka_list_attachments`, `planka_add_attachment`, `planka_rename_attachment`, `planka_delete_attachment`, `planka_download_attachment` | See [Attachments](#attachments). `get_card` also lists a card's attachments |
 | Comments | `planka_add_comment`, `planka_update_comment`, `planka_delete_comment` | |
 | Tasks | `planka_create_task_list`, `planka_add_task`, `planka_update_task`, `planka_delete_task` | |
 | Labels | `planka_create_label`, `planka_add_label_to_card`, `planka_remove_label_from_card` | 42 Planka color names |
@@ -164,6 +167,21 @@ What Planka does:
 - card members and task assignees who aren't members of the target board are removed
 - custom fields are detached
 
+## Attachments
+
+| Tool | What it does |
+|---|---|
+| `planka_list_attachments` | A card's files and links: name, URL, MIME type, size, image size, which one is the cover |
+| `planka_add_attachment` | Exactly one source: `filePath` (a local file), `content` (base64, with `filename`) or `url` (a link attachment). `setAsCover: true` makes an uploaded image the card cover. Needs board **editor** rights |
+| `planka_rename_attachment` | Change the display name |
+| `planka_delete_attachment` | Delete the attachment and its file. Destructive, so it's worth adding to the client's "ask before" list (see below) |
+| `planka_download_attachment` | With `savePath`: saves the file. A directory keeps the attachment's name, and existing files are only replaced with `overwrite: true`. Without `savePath`: text files up to 256 KB come back as text, and images up to 2 MB as an image the assistant can look at. Larger or binary files need `savePath` |
+
+- **Where files can be:** the server reads and writes local files with its own process rights. Set `PLANKA_FILES_DIR` to limit it to one folder; then paths outside it are refused, even through symlinks.
+- **Downloads keep the API key at home:** the key is only sent to your Planka host. A URL pointing anywhere else is refused.
+- **Docker / Podman mode:** the container only sees its own filesystem, so mount a folder and point `PLANKA_FILES_DIR` at it. `./register.sh --files-dir ~/planka-files` does that: it adds `-v ~/planka-files:/files -e PLANKA_FILES_DIR=/files` to the `docker run` arguments. Files the server saves there are owned by root, because the container runs as root. Then `filePath: "report.pdf"` means `$HOME/planka-files/report.pdf`. `content` (base64) works without any mount.
+- **Claude Code permission:** add `"mcp__planka__planka_delete_attachment"` to `permissions.ask` in `~/.claude/settings.json` to be asked before each delete, like the other delete tools.
+
 ## Notifications & two-way comments
 
 The tracker saves a snapshot of every board (each card's list and comment count) and reports what changed since then:
@@ -193,7 +211,7 @@ Planka's own webhooks need a public HTTPS endpoint. Polling works from a laptop 
 
 | Aspect | Raw API token | This MCP server |
 |---|---|---|
-| Reach | Every endpoint your role allows | 31 curated tools |
+| Reach | Every endpoint your role allows | 36 curated tools |
 | Consumer | You or a script that knows routes and bodies | An AI assistant (any MCP client), from natural-language requests |
 | IDs / positions | You look them up and calculate them by hand | Resolved from `get_board`/`search_cards`; `top`/`bottom`/index |
 | Tokens | Raw board JSON: 17–100 KB | **12.1× smaller** (398 KB → 33 KB, measured over 8 real boards) |

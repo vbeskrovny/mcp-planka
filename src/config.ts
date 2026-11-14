@@ -9,6 +9,8 @@ export interface PlankaConfig {
   managers: string[];
   /** INSTRUCTIONS setting: unset = built-in workflow rules, "off" = none, otherwise a file path. */
   instructions?: string;
+  /** If set, attachment tools only read/write local files inside this directory. */
+  filesDir?: string;
 }
 
 export class ConfigError extends Error {
@@ -73,5 +75,12 @@ export function loadConfig(opts: LoadConfigOptions = {}): PlankaConfig {
     .map((m) => m.trim())
     .filter(Boolean);
   const instructions = env.PLANKA_INSTRUCTIONS ?? fileValues.INSTRUCTIONS ?? fileValues.PLANKA_INSTRUCTIONS;
-  return { url: url!.replace(/\/+$/, ""), apiKey: apiKey!, managers, ...(instructions !== undefined ? { instructions } : {}) };
+  const filesDir = env.PLANKA_FILES_DIR || fileValues.FILES_DIR || fileValues.PLANKA_FILES_DIR || undefined;
+  return {
+    url: url!.replace(/\/+$/, ""),
+    apiKey: apiKey!,
+    managers,
+    ...(instructions !== undefined ? { instructions } : {}),
+    ...(filesDir ? { filesDir } : {}),
+  };
 }

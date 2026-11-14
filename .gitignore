@@ -8,3 +8,5 @@ mirror_key
 mirror_key.pub
 *.pem
 id_*
+# attachment uploads/downloads (register.sh --files-dir ./attachments)
+/attachments/

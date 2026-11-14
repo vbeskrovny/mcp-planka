@@ -179,8 +179,39 @@ What Planka does:
 
 - **Where files can be:** the server reads and writes local files with its own process rights. Set `PLANKA_FILES_DIR` to limit it to one folder; then paths outside it are refused, even through symlinks.
 - **Downloads keep the API key at home:** the key is only sent to your Planka host. A URL pointing anywhere else is refused.
-- **Docker / Podman mode:** the container only sees its own filesystem, so mount a folder and point `PLANKA_FILES_DIR` at it. `./register.sh --files-dir ~/planka-files` does that: it adds `-v ~/planka-files:/files -e PLANKA_FILES_DIR=/files` to the `docker run` arguments. Files the server saves there are owned by root, because the container runs as root. Then `filePath: "report.pdf"` means `$HOME/planka-files/report.pdf`. `content` (base64) works without any mount.
+- **Docker / Podman mode:** the container can't see your files unless a folder is mounted. See [Attachments in Docker / Podman mode](#attachments-in-docker--podman-mode).
 - **Claude Code permission:** add `"mcp__planka__planka_delete_attachment"` to `permissions.ask` in `~/.claude/settings.json` to be asked before each delete, like the other delete tools.
+
+### Attachments in Docker / Podman mode
+
+The server runs in a throwaway container (`docker run --rm`), so it only sees the container's own filesystem:
+
+| Without a mounted folder | Works? |
+|---|---|
+| Inline downloads (text up to 256 KB, images up to 2 MB) | yes |
+| Uploads from `content` (base64) and link attachments | yes |
+| Uploads from `filePath` | no: host files aren't visible in the container |
+| Downloads with `savePath` | no: the file is written inside the container and lost when it exits |
+
+**Setup:** mount a folder, for example `attachments/` next to `.planka`:
+
+```bash
+mkdir -p attachments && chmod 700 attachments
+./register.sh --files-dir ./attachments
+```
+
+`register.sh` turns the path into an absolute one and adds `-v <repo>/attachments:/files:rw -e PLANKA_FILES_DIR=/files` to the `docker run` command (Podman: `rw,z` for SELinux).
+
+**Paths:**
+- **Relative paths start in the folder:** inside the container the folder is `/files`. `filePath: "report.pdf"` reads `<repo>/attachments/report.pdf`, and `savePath: "./"` saves into `attachments/`.
+- **Everything else is refused:** absolute host paths such as `/home/you/x.pdf` and paths that leave the folder, including through symlinks.
+- **Subfolders:** `savePath: "in/"` works once `attachments/in/` exists.
+
+**Good to know:**
+- **Ownership:** files the server saves belong to root, because the container runs as root. With rootless Podman they belong to your user.
+- **Kept out of git:** `attachments/` is in `.gitignore`, so downloads are never committed, for example by a script that runs `git add -A`, and never mirrored.
+- **Pass `--files-dir` every time:** re-running `./register.sh` replaces the registration, so pass `--files-dir` again after each `git pull` and rebuild. Without it, the mount is gone.
+- **Node mode:** the server uses your own filesystem, so no mount is needed. `--files-dir` there only sets `PLANKA_FILES_DIR` to limit file access to that folder.
 
 ## Notifications & two-way comments
 

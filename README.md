@@ -25,6 +25,7 @@ KEY=<api key>
 | `PLANKA_URL`, `PLANKA_API_KEY` | Override the `.planka` file |
 | `PLANKA_CONFIG` | Path to a `.planka` file |
 | `PLANKA_MANAGERS` / `MANAGERS=` in `.planka` | Comma-separated users (id, username, email or name). They become editors of every board `planka_create_project` / `planka_create_board` creates. Projects are always private with a single owner (the API-key user), so they don't become project managers there. No confirmation needed |
+| `PLANKA_INSTRUCTIONS` / `INSTRUCTIONS=` in `.planka` | Workflow rules the server sends to the client as MCP *instructions* when it connects. They cover tracking work on the project board matching the folder name, comments without a signature, and preview plus confirmation before deletes. Unset: the built-in rules (`src/instructions.ts`). `off`: none. A file path: that file's text |
 | `PLANKA_STATE_DIR` | Where update-tracking snapshots are stored (default `~/.mcp-planka`) |
 | `PLANKA_BACKLOG_PATTERN` | Regex (case-insensitive) that marks a list as a backlog (default `backlog`) |
 | `PLANKA_WATCH_INTERVAL` | Poll seconds for the watcher (default 60, min 10) |
@@ -114,7 +115,7 @@ Check that it works by asking the assistant to "call planka_whoami". To test the
 
 **What doesn't carry over from Claude Code:**
 - **Registration:** `register.sh` / `register.ps1` only register with Claude Code. Other clients need the config entry above.
-- **Workflow rules:** rules such as "track work on the board", "comments without a signature" and "preview before delete, confirm by name" are written as instructions for the assistant. In Claude Code they live in `CLAUDE.md`. Put them in your client's equivalent: `AGENTS.md` (Codex), `.cursor/rules`, `GEMINI.md`, `.github/copilot-instructions.md`, and so on.
+- **Workflow rules:** they ship with the server as MCP instructions (see `INSTRUCTIONS` above), so every client that supports server instructions gets them. For a client that ignores them, copy `src/instructions.ts`'s text into that client's rules file: `AGENTS.md` (Codex), `.cursor/rules`, `GEMINI.md`, `.github/copilot-instructions.md`, and so on.
 - **Approval prompts:** whether the client asks you before running a tool is up to the client. The server's own safeguards work in every client:
   - Projects are always private.
   - Deletes need a preview and then the exact name.

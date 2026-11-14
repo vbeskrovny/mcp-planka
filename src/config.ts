@@ -7,6 +7,8 @@ export interface PlankaConfig {
   apiKey: string;
   /** Users (id, username, email or name) added as managers to every project the MCP creates. */
   managers: string[];
+  /** INSTRUCTIONS setting: unset = built-in workflow rules, "off" = none, otherwise a file path. */
+  instructions?: string;
 }
 
 export class ConfigError extends Error {
@@ -70,5 +72,6 @@ export function loadConfig(opts: LoadConfigOptions = {}): PlankaConfig {
     .split(",")
     .map((m) => m.trim())
     .filter(Boolean);
-  return { url: url!.replace(/\/+$/, ""), apiKey: apiKey!, managers };
+  const instructions = env.PLANKA_INSTRUCTIONS ?? fileValues.INSTRUCTIONS ?? fileValues.PLANKA_INSTRUCTIONS;
+  return { url: url!.replace(/\/+$/, ""), apiKey: apiKey!, managers, ...(instructions !== undefined ? { instructions } : {}) };
 }

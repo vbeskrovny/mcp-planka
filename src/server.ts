@@ -18,9 +18,12 @@ export const SERVER_VERSION = "0.1.0";
 export function createServer(
   client: PlankaClient,
   tracker = new UpdateTracker(client),
-  opts: { managers?: string[] } = {},
+  opts: { managers?: string[]; instructions?: string } = {},
 ): McpServer {
-  const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION });
+  const server = new McpServer(
+    { name: SERVER_NAME, version: SERVER_VERSION },
+    opts.instructions ? { instructions: opts.instructions } : undefined,
+  );
   registerBrowseTools(server, client);
   registerProjectTools(server, client, opts.managers ?? []);
   registerListTools(server, client);

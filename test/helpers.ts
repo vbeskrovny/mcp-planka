@@ -28,7 +28,7 @@ export function fakePlanka(routes: Record<string, unknown | Handler>) {
   return { calls, client: new PlankaClient("https://planka.test", "TESTKEY", fetchImpl) };
 }
 
-export async function connect(planka: PlankaClient, opts: { managers?: string[] } = {}) {
+export async function connect(planka: PlankaClient, opts: { managers?: string[]; instructions?: string } = {}) {
   const server = createServer(planka, undefined, opts);
   const [a, b] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "test", version: "0" });

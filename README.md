@@ -131,7 +131,7 @@ Check that it works by asking the assistant to "call planka_whoami". To test the
 
 | Area | Tool | Notes |
 |---|---|---|
-| Browse | `planka_whoami`, `planka_list_projects`, `planka_get_board`, `planka_get_card`, `planka_search_cards` | Read-only. The output is compact JSON |
+| Browse | `planka_whoami`, `planka_list_projects`, `planka_get_board`, `planka_get_card`, `planka_search_cards` | Read-only. The output is compact JSON. Search and `get_board` can filter by labels, see [Searching and filtering by labels](#searching-and-filtering-by-labels) |
 | Projects | `planka_find_project`, `planka_create_project`, `planka_update_project`, `planka_create_board` | Find matches names case-insensitively. Create **always** makes a **private** project with an **UPPERCASE** name (`mcp-planka` → `MCP-PLANKA`; there is no shared option; verified: other users, admins included, don't see it). The `MANAGERS` from the config become editors of its board automatically. `update_project` renames a project (also to UPPERCASE), changes or clears its description, and toggles the hide option. It also sets up a default board: Backlog / In Progress / Testing / Done. `create_board` has `addProjectManagers: true` to make the project's managers editors (by default only the creator is a member) |
 | Lists | `planka_create_list`, `planka_update_list`, `planka_move_list` | `type`: `active` / `closed`. `move_list` moves a list and its cards to another board, also in another project (see below) |
 | Cards | `planka_create_card`, `planka_update_card`, `planka_move_card`, `planka_delete_card` | To close a card, move it into a `closed` list. `update_card` sets or clears the cover image (`coverAttachmentId`) |
@@ -166,6 +166,27 @@ What Planka does:
 - labels are re-created by name on the target board, or matched to an existing label with the same name
 - card members and task assignees who aren't members of the target board are removed
 - custom fields are detached
+
+## Searching and filtering by labels
+
+`planka_search_cards` finds cards by text (`query`, in names and descriptions), by labels, or both:
+
+| You want | Call |
+|---|---|
+| Cards labelled monitoring **or** todo | `{ labels: ["monitoring", "todo"] }` (`match: "any"` is the default) |
+| Cards labelled monitoring **and** todo | `{ labels: ["monitoring", "todo"], match: "all" }` |
+| Cards labelled monitoring that mention "disk" | `{ query: "disk", labels: ["monitoring"] }` |
+| Only in one project / board | add `projectId` or `boardId` |
+
+- **Matching:** label names ignore case, and an unnamed label matches by its color. Each result lists its labels and its board and list. Archive and trash lists are skipped unless `includeArchived: true`.
+- **Typos show up:** `labelsNotFound` names requested labels that exist on none of the searched boards. For a project or board search, `missingLabels` also lists them per board.
+- **`planka_get_board`** takes the same `labels` / `match` filter. It returns only matching cards, leaves out lists without any, and adds `labelFilter` with the number of matches.
+
+**Search only reads your own private projects.** The search only reads **private projects owned by the API-key user**. Some projects are never read, so their content can't leak into results:
+- **Shared projects.**
+- **Other people's private projects,** even where the bot is a board member.
+
+A `projectId` or `boardId` outside your own private projects is refused. An account-wide search reports how many visible projects it left out (`excludedProjects`).
 
 ## Attachments
 

@@ -15,6 +15,53 @@ function compact<T extends Rec>(o: T): Partial<T> {
   return out as Partial<T>;
 }
 
+export type LabelMatch = "any" | "all";
+export interface LabelFilter {
+  labels: string[];
+  /** "any" (default): at least one of the labels; "all": every label. */
+  match?: LabelMatch;
+}
+
+const normLabel = (s: unknown) => String(s ?? "").trim().toLowerCase();
+/** A label's display name: its name, or its color for unnamed labels (as Planka shows them). */
+const labelDisplay = (l: Rec) => l.name ?? l.color;
+
+/**
+ * Apply a label filter to one board payload. Names match case-insensitively; unnamed labels
+ * match by color. Returns the matching card IDs and the requested labels the board doesn't have.
+ */
+export function matchLabels(resp: Rec, filter: LabelFilter): { cardIds: Set<string>; missing: string[] } {
+  const inc = resp.included ?? {};
+  const idsByName = new Map<string, Set<string>>();
+  for (const l of inc.labels ?? []) {
+    const n = normLabel(labelDisplay(l));
+    if (!idsByName.has(n)) idsByName.set(n, new Set());
+    idsByName.get(n)!.add(l.id);
+  }
+  const seen = new Set<string>();
+  const wanted = filter.labels.filter((l) => {
+    const n = normLabel(l);
+    if (!n || seen.has(n)) return false;
+    seen.add(n);
+    return true;
+  });
+  const missing = wanted.filter((l) => !idsByName.has(normLabel(l)));
+
+  const labelsOfCard = new Map<string, Set<string>>();
+  for (const cl of inc.cardLabels ?? []) {
+    if (!labelsOfCard.has(cl.cardId)) labelsOfCard.set(cl.cardId, new Set());
+    labelsOfCard.get(cl.cardId)!.add(cl.labelId);
+  }
+  const cardIds = new Set<string>();
+  for (const c of inc.cards ?? []) {
+    const own = labelsOfCard.get(c.id) ?? new Set<string>();
+    const has = wanted.filter((l) => [...(idsByName.get(normLabel(l)) ?? [])].some((id) => own.has(id)));
+    const ok = filter.match === "all" ? wanted.length > 0 && has.length === wanted.length : has.length > 0;
+    if (ok) cardIds.add(c.id);
+  }
+  return { cardIds, missing };
+}
+
 export function truncate(s: string | null | undefined, max: number): string | undefined {
   if (!s) return undefined;
   const flat = s.replace(/\s+/g, " ").trim();
@@ -48,13 +95,16 @@ export interface FormatBoardOptions {
   includeArchived?: boolean;
   /** Include a short description preview per card. */
   includeDescriptions?: boolean;
+  /** Only keep cards with these labels; lists without matching cards are left out. */
+  labelFilter?: LabelFilter;
 }
 
 export function formatBoard(resp: Rec, opts: FormatBoardOptions = {}) {
   const b = resp.item;
   const inc = resp.included ?? {};
   const labels: Rec[] = [...(inc.labels ?? [])].sort(byPos);
-  const labelName = new Map(labels.map((l) => [l.id, l.name ?? l.color]));
+  const labelName = new Map(labels.map((l) => [l.id, labelDisplay(l)]));
+  const filtered = opts.labelFilter?.labels.length ? matchLabels(resp, opts.labelFilter) : undefined;
   const cardLabels: Rec[] = inc.cardLabels ?? [];
   const taskLists: Rec[] = inc.taskLists ?? [];
   const tasks: Rec[] = inc.tasks ?? [];
@@ -70,7 +120,7 @@ export function formatBoard(resp: Rec, opts: FormatBoardOptions = {}) {
         name: l.name,
         type: l.type === "active" ? undefined : l.type,
         cards: cards
-          .filter((c) => c.listId === l.id)
+          .filter((c) => c.listId === l.id && (!filtered || filtered.cardIds.has(c.id)))
           .map((c) =>
             compact({
               id: c.id,
@@ -93,7 +143,15 @@ export function formatBoard(resp: Rec, opts: FormatBoardOptions = {}) {
     project: project ? { id: project.id, name: project.name } : { id: b.projectId },
     defaultCardType: b.defaultCardType,
     labels: labels.map((l) => compact({ id: l.id, name: l.name, color: l.color })),
-    lists,
+    labelFilter: filtered
+      ? compact({
+          labels: opts.labelFilter!.labels,
+          match: opts.labelFilter!.match ?? "any",
+          matchingCards: lists.reduce((n: number, l: Rec) => n + (l.cards?.length ?? 0), 0),
+          missingLabels: filtered.missing,
+        })
+      : undefined,
+    lists: filtered ? lists.filter((l: Rec) => l.cards?.length) : lists,
   });
 }
 
@@ -164,13 +222,26 @@ export interface SearchHit {
   list: string;
   cardId: string;
   name: string;
-  matchedIn: "name" | "description";
+  matchedIn: "name" | "description" | "labels";
+  labels?: string[];
   snippet?: string;
 }
 
-export function searchBoard(resp: Rec, query: string, opts: { includeArchived?: boolean } = {}): SearchHit[] {
-  const q = query.toLowerCase();
+/**
+ * Find cards on one board by text (name/description, case-insensitive) and/or labels. With only a
+ * label filter, every card carrying the labels is a hit (matchedIn "labels").
+ */
+export function searchBoard(
+  resp: Rec,
+  query: string | undefined,
+  opts: { includeArchived?: boolean; labelFilter?: LabelFilter } = {},
+): SearchHit[] {
+  const q = query?.toLowerCase();
   const inc = resp.included ?? {};
+  const filtered = opts.labelFilter?.labels.length ? matchLabels(resp, opts.labelFilter) : undefined;
+  const labelName = new Map<string, string>((inc.labels ?? []).map((l: Rec) => [l.id, labelDisplay(l)]));
+  const cardLabelNames = (cardId: string) =>
+    (inc.cardLabels ?? []).filter((cl: Rec) => cl.cardId === cardId).map((cl: Rec) => labelName.get(cl.labelId)).filter(Boolean);
   const lists = new Map<string, Rec>((inc.lists ?? []).map((l: Rec) => [l.id, l]));
   const hits: SearchHit[] = [];
   const listPos = (c: Rec) => lists.get(c.listId)?.position ?? Number.MAX_SAFE_INTEGER;
@@ -178,17 +249,20 @@ export function searchBoard(resp: Rec, query: string, opts: { includeArchived?: 
   for (const c of ordered) {
     const list = lists.get(c.listId);
     if (!opts.includeArchived && list && HIDDEN_LIST_TYPES.has(list.type)) continue;
-    const inName = c.name?.toLowerCase().includes(q);
-    const descIdx = c.description ? c.description.toLowerCase().indexOf(q) : -1;
-    if (!inName && descIdx < 0) continue;
+    if (filtered && !filtered.cardIds.has(c.id)) continue;
+    const inName = q ? c.name?.toLowerCase().includes(q) : false;
+    const descIdx = q && c.description ? c.description.toLowerCase().indexOf(q) : -1;
+    if (q && !inName && descIdx < 0) continue;
+    const labels = cardLabelNames(c.id);
     hits.push({
       boardId: resp.item.id,
       board: resp.item.name,
       list: list?.name ?? c.listId,
       cardId: c.id,
       name: c.name,
-      matchedIn: inName ? "name" : "description",
-      snippet: inName ? undefined : truncate(c.description.slice(Math.max(0, descIdx - 40), descIdx + 80), 120),
+      matchedIn: !q ? "labels" : inName ? "name" : "description",
+      ...(labels.length ? { labels } : {}),
+      snippet: !q || inName ? undefined : truncate(c.description.slice(Math.max(0, descIdx - 40), descIdx + 80), 120),
     });
   }
   return hits;

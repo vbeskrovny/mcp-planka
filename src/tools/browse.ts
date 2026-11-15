@@ -1,10 +1,34 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { PlankaClient } from "../client.js";
-import { formatBoard, formatCard, formatProjects, searchBoard, type SearchHit } from "../format.js";
+import { loadOwnScope } from "../scope.js";
+import { formatBoard, formatCard, formatProjects, matchLabels, searchBoard, type SearchHit } from "../format.js";
 import { id, safe } from "../util.js";
 
 const RO = { readOnlyHint: true, openWorldHint: true } as const;
+
+const labelsInput = z
+  .array(z.string().min(1).max(128))
+  .min(1)
+  .max(20)
+  .optional()
+  .describe("Only cards with these labels (names, case-insensitive)");
+const matchInput = z
+  .enum(["any", "all"])
+  .optional()
+  .describe('With labels: "any" = at least one of them (OR, default), "all" = every one (AND)');
+
+const normLabel = (l: string) => l.trim().toLowerCase();
+/** Requested labels (first spelling, deduplicated case-insensitively) that no searched board has. */
+const labelsNotFound = (labels: string[], found: Set<string>) => {
+  const seen = new Set<string>();
+  return labels.filter((l) => {
+    const n = normLabel(l);
+    if (!n || seen.has(n) || found.has(n)) return false;
+    seen.add(n);
+    return true;
+  });
+};
 
 export function registerBrowseTools(server: McpServer, client: PlankaClient) {
   server.registerTool(
@@ -38,16 +62,24 @@ export function registerBrowseTools(server: McpServer, client: PlankaClient) {
       title: "Get board",
       description:
         "Get a board as lists → cards (with label names, task progress 'done/total', due date, comment count). " +
-        "Also returns the board's labels and list IDs needed for creating/moving cards.",
+        "Also returns the board's labels and list IDs needed for creating/moving cards. With labels, only cards " +
+        "carrying them are returned (match any/all), lists without such cards are left out, and labelFilter " +
+        "reports the number of matches and any labels the board doesn't have.",
       inputSchema: {
         boardId: id("Board ID"),
         includeArchived: z.boolean().optional().describe("Include archive/trash lists (default false)"),
         includeDescriptions: z.boolean().optional().describe("Include a short description preview per card (default false)"),
+        labels: labelsInput,
+        match: matchInput,
       },
       annotations: RO,
     },
-    safe(async ({ boardId, includeArchived, includeDescriptions }) =>
-      formatBoard(await client.get(`/boards/${boardId}`), { includeArchived, includeDescriptions }),
+    safe(async ({ boardId, includeArchived, includeDescriptions, labels, match }) =>
+      formatBoard(await client.get(`/boards/${boardId}`), {
+        includeArchived,
+        includeDescriptions,
+        labelFilter: labels ? { labels, match } : undefined,
+      }),
     ),
   );
 
@@ -74,10 +106,16 @@ export function registerBrowseTools(server: McpServer, client: PlankaClient) {
     {
       title: "Search cards",
       description:
-        "Case-insensitive text search over card names and descriptions. Scope to a board or project; " +
-        "with no scope, searches every board you can see.",
+        "Find cards by text and/or labels. query: case-insensitive search over card names and descriptions. " +
+        "labels: only cards with those labels (match \"any\" = OR, default; \"all\" = AND). Give query, labels or both. " +
+        "Only searches PRIVATE projects owned by the API-key user (shared projects and other people's projects are never " +
+        "read). Scope to one of those boards or projects; with no scope, searches all of them. Each result lists its labels; " +
+        "labels that exist on none of the searched boards are reported in labelsNotFound (and, for a board or project " +
+        "search, per board in missingLabels), unreadable boards in skippedBoards.",
       inputSchema: {
-        query: z.string().min(1).describe("Text to search for"),
+        query: z.string().min(1).optional().describe("Text to search for"),
+        labels: labelsInput,
+        match: matchInput,
         boardId: id("Board ID to search in").optional(),
         projectId: id("Project ID whose boards to search").optional(),
         includeArchived: z.boolean().optional().describe("Also search archive/trash lists (default false)"),
@@ -85,21 +123,64 @@ export function registerBrowseTools(server: McpServer, client: PlankaClient) {
       },
       annotations: RO,
     },
-    safe(async ({ query, boardId, projectId, includeArchived, limit = 50 }) => {
+    safe(async ({ query, labels, match, boardId, projectId, includeArchived, limit = 50 }) => {
+      if (!query && !labels?.length) throw new Error("Give query, labels or both");
+      const labelFilter = labels?.length ? { labels, match } : undefined;
+      const scope = await loadOwnScope(client);
       let boardIds: string[];
-      if (boardId) boardIds = [boardId];
-      else {
-        const projects = await client.get("/projects");
-        boardIds = (projects.included?.boards ?? [])
-          .filter((b: any) => !projectId || b.projectId === projectId)
-          .map((b: any) => b.id);
+      if (boardId) {
+        if (!scope.projectIds.has(scope.boardProject.get(boardId) ?? "")) {
+          throw new Error(`Board ${boardId} is not in one of your own private projects; search only reads those`);
+        }
+        boardIds = [boardId];
+      } else if (projectId) {
+        if (!scope.projectIds.has(projectId)) {
+          throw new Error(`Project ${projectId} is not one of your own private projects; search only reads those`);
+        }
+        boardIds = scope.boards.filter((b) => b.projectId === projectId).map((b) => b.id);
+      } else {
+        boardIds = scope.boards.map((b) => b.id);
       }
       const hits: SearchHit[] = [];
+      const missingLabels: { boardId: string; board: string; labels: string[] }[] = [];
+      const foundSomewhere = new Set<string>();
+      const skippedBoards: { boardId: string; error: string }[] = [];
+      let searched = 0;
       for (const bid of boardIds) {
-        hits.push(...searchBoard(await client.get(`/boards/${bid}`), query, { includeArchived }));
+        let resp: any;
+        try {
+          resp = await client.get(`/boards/${bid}`);
+        } catch (err) {
+          // One unreadable board (e.g. no membership) shouldn't fail a project- or account-wide search.
+          if (boardId) throw err;
+          skippedBoards.push({ boardId: bid, error: err instanceof Error ? err.message : String(err) });
+          continue;
+        }
+        searched++;
+        if (labelFilter) {
+          const { missing } = matchLabels(resp, labelFilter);
+          const missingNorm = new Set(missing.map(normLabel));
+          for (const l of labelFilter.labels) if (!missingNorm.has(normLabel(l))) foundSomewhere.add(normLabel(l));
+          if (missing.length) missingLabels.push({ boardId: bid, board: resp.item.name, labels: missing });
+        }
+        hits.push(...searchBoard(resp, query, { includeArchived, labelFilter }));
         if (hits.length >= limit) break;
       }
-      return { query, boardsSearched: boardIds.length, total: Math.min(hits.length, limit), results: hits.slice(0, limit) };
+      return {
+        ...(query ? { query } : {}),
+        ...(labelFilter ? { labels, match: match ?? "any" } : {}),
+        boardsSearched: searched,
+        ...(!boardId && !projectId && scope.excludedProjects ? { excludedProjects: scope.excludedProjects } : {}),
+        total: Math.min(hits.length, limit),
+        ...(hits.length > limit ? { truncated: true } : {}),
+        results: hits.slice(0, limit),
+        // Labels that exist on none of the searched boards (typo?); per-board gaps only for a scoped search.
+        ...(labelFilter && labelsNotFound(labelFilter.labels, foundSomewhere).length
+          ? { labelsNotFound: labelsNotFound(labelFilter.labels, foundSomewhere) }
+          : {}),
+        ...((boardId || projectId) && missingLabels.length ? { missingLabels } : {}),
+        ...(skippedBoards.length ? { skippedBoards } : {}),
+      };
     }),
   );
 }

@@ -184,7 +184,8 @@ for s in local user project; do
 done
 
 echo "Registering '$NAME' ($SCOPE scope, $MODE)..."
-run claude mcp add -s "$SCOPE" "${ENV_ARGS[@]}" "$NAME" -- "${SERVER[@]}"
+# Name before -e: newer Claude Code versions read -e as a list and would take the name as a variable.
+run claude mcp add -s "$SCOPE" "$NAME" "${ENV_ARGS[@]}" -- "${SERVER[@]}"
 
 if [[ $DRY -eq 0 ]]; then
   claude mcp get "$NAME" | sed 's/^/  /'

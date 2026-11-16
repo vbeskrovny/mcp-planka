@@ -23,6 +23,7 @@ export const DEFAULT_INSTRUCTIONS = `Planka progress tracking. Follow these rule
 
 ## When tracked
 - Session start: call planka_check_updates with the projectId. Act on new Backlog cards and answer new comments on their card with planka_add_comment. Then read the board with planka_get_board and tell the user which cards are waiting in the Backlog.
+- Also at session start, unless a Planka loop or watcher is already running in this session, end that summary with a one-line reminder that automatic checking is off and how to turn it on. In Claude Code: type \`/loop 1m check planka updates and reply to new comments\` (1 minute is the shortest /loop interval), or ask for the watcher (\`node dist/watch.js --project <projectId> --interval 30\` under the Monitor tool) for checks every 30 s. In other clients, mention only the watcher. Don't start either yourself.
 - Pick up work in priority order: first cards already under way (any list other than Backlog and Done, e.g. In Progress, Testing, Review). Only when none of those need processing, take the next card from the Backlog.
 - New work: check planka_get_board first so you don't duplicate an existing card. Otherwise create a card in Backlog with a "TODO" task list holding the steps. Move it to In Progress when you start, Testing when tests run, and Done once verified.
 - Tick tasks as you complete them. Add a short comment at milestones: test results, decisions, blockers.

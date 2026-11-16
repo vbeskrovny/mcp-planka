@@ -46,6 +46,21 @@ describe("DEFAULT_INSTRUCTIONS", () => {
     expect(DEFAULT_INSTRUCTIONS).toMatch(/Before moving a card to another list.*planka_get_card.*new comments/s);
     expect(DEFAULT_INSTRUCTIONS).toMatch(/No match: ask the user once whether to create the project/);
   });
+
+  it("reminds the user at session start how to enable automatic checks, without starting them", () => {
+    const rule = DEFAULT_INSTRUCTIONS.split("\n").find((l) => l.includes("automatic checking is off")) ?? "";
+    expect(rule).toMatch(/session start/i);
+    expect(rule).toMatch(/unless a Planka loop or watcher is already running/);
+    expect(rule).toContain("/loop 1m check planka updates and reply to new comments");
+    expect(rule).toMatch(/watch\.js --project <projectId> --interval 30/);
+    expect(rule).toMatch(/Don't start either yourself/);
+  });
+
+  it("only suggests watcher intervals the watcher accepts (>= 10 s)", () => {
+    const intervals = [...DEFAULT_INSTRUCTIONS.matchAll(/--interval (\d+)/g)].map((m) => Number(m[1]));
+    expect(intervals.length).toBeGreaterThan(0);
+    for (const n of intervals) expect(n).toBeGreaterThanOrEqual(10);
+  });
 });
 
 describe("server instructions", () => {

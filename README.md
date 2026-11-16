@@ -59,8 +59,11 @@ The script then checks the API key against the server, replaces any existing reg
 ./register.sh --dry-run                                  # show what would happen
 ```
 ```powershell
-.\register.ps1        # Windows-native Claude Code; uses Windows Node, or WSL if no Node is installed
+.\register.ps1                    # Windows-native Claude Code; uses Windows Node >= 20, else Node inside WSL
+.\register.ps1 -ForceWsl -Distro Debian   # use WSL even if Windows Node exists; pick the distro
+.\register.ps1 -DryRun
 ```
+With WSL, the script finds Node by absolute path, including nvm installs that only load in interactive shells, and registers `wsl.exe -e <node> <repo>/dist/index.js`. It rebuilds only when `src/` is newer than `dist/`.
 
 In container mode:
 - `.planka` is mounted read-only and never copied into the image (`.dockerignore`).
@@ -254,6 +257,8 @@ You can receive events in three ways:
 
    In Claude Code, run the watcher under the **Monitor** tool. Each event then arrives in the session and Claude can answer it on the card. With other clients, pipe the JSON lines into your own notifier. The watcher keeps its own state (`watch-state.json`), so it never consumes the MCP tool's events.
 3. **Scheduled**: in Claude Code, `/loop 10m check planka updates and reply to new comments`. Other clients can use their own scheduler or cron.
+
+Automatic checks don't start by themselves. The built-in instructions tell the assistant to end its session-start summary with a one-line reminder: `/loop 1m …` in Claude Code, or the watcher for 30-second checks. It skips the reminder once a loop or watcher is running. Set `INSTRUCTIONS=off` or use your own instructions file to drop it.
 
 > **Can't comment on a board?** Planka only lets *board members* comment. Project managers can administer a board without being a member of it. A board created through the API key also starts with the key's user as its only member. Fix it with `planka_sync_board_members` (preview first with `dryRun: true`, then apply with `dryRun: false`), or add members in the board header.
 

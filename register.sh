@@ -6,7 +6,10 @@
 #   --mode     how to run the server; auto (default) tests what works here, recommends one and asks
 #   --yes      take the recommended mode without asking (also used when there is no terminal)
 #   --config   use a specific .planka file (e.g. another user's API key); default: .planka in the repo
-#   --files-dir  folder the attachment tools may read/write (PLANKA_FILES_DIR); mounted as /files in containers
+#   --files-dir  folder the attachment tools may read/write (PLANKA_FILES_DIR); mounted as /files in containers.
+#              Default: PLANKA_FILES_DIR, else FILES_DIR in the config file, else <repo>/attachments
+#              (created, mode 700).
+#              "none" = no folder (Node: any path the server can access; containers: no host files)
 #   --dry-run  print what would be done, change nothing
 set -euo pipefail
 
@@ -28,7 +31,7 @@ while [[ $# -gt 0 ]]; do
     --config)  CONFIG="$2"; shift 2 ;;
     --files-dir) FILES_DIR="$2"; shift 2 ;;
     --dry-run) DRY=1; shift ;;
-    -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -50,16 +53,38 @@ elif [[ -f "$ROOT/.planka" ]]; then
 elif [[ -z "${PLANKA_URL:-}" || -z "${PLANKA_API_KEY:-}" ]]; then
   die "no $ROOT/.planka (URL=... / KEY=... / MANAGERS=...) and PLANKA_URL/PLANKA_API_KEY not set"
 fi
+# The config holds the API key: make it private to its owner (only if it is ours to change).
 if [[ -n "$CONFIG" ]]; then
   perms="$(stat -c %a "$CONFIG" 2>/dev/null || echo 600)"
   if (( (8#$perms & 8#077) != 0 )); then
-    echo "warning: $CONFIG ($perms) is readable by other users; consider: chmod 600 $CONFIG"
+    if [[ -O "$CONFIG" ]]; then
+      echo "Restricting $CONFIG ($perms -> 600): it contains the API key"; run chmod 600 "$CONFIG"
+    else
+      echo "warning: $CONFIG ($perms) is readable by other users and not owned by you; ask its owner to chmod 600 it"
+    fi
   fi
 fi
 
-if [[ -n "$FILES_DIR" ]]; then
-  [[ -d "$FILES_DIR" ]] || die "--files-dir: not a directory: $FILES_DIR"
-  FILES_DIR="$(cd "$FILES_DIR" && pwd -P)"
+# Folder for attachment uploads/downloads: --files-dir, else PLANKA_FILES_DIR, else FILES_DIR from the config,
+# else <repo>/attachments.
+config_value() { if [[ -n "$CONFIG" ]]; then sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$CONFIG" | tr -d '\r' | tail -1; fi; }
+if [[ -z "$FILES_DIR" ]]; then
+  FILES_DIR="${PLANKA_FILES_DIR:-}"
+  [[ -n "$FILES_DIR" ]] || FILES_DIR="$(config_value FILES_DIR)"
+  [[ -n "$FILES_DIR" ]] || FILES_DIR="$(config_value PLANKA_FILES_DIR)"
+  [[ -n "$FILES_DIR" ]] || FILES_DIR="$ROOT/attachments"
+fi
+if [[ "${FILES_DIR,,}" == "none" ]]; then
+  FILES_DIR=""
+else
+  [[ "$FILES_DIR" = /* ]] || FILES_DIR="$PWD/$FILES_DIR"
+  if [[ ! -d "$FILES_DIR" ]]; then
+    [[ -e "$FILES_DIR" ]] && die "files dir is not a directory: $FILES_DIR"
+    echo "Creating files folder $FILES_DIR (mode 700)"
+    run mkdir -p "$FILES_DIR"; run chmod 700 "$FILES_DIR"
+  fi
+  [[ -d "$FILES_DIR" ]] && FILES_DIR="$(cd "$FILES_DIR" && pwd -P)"
+  echo "Attachment files folder: $FILES_DIR"
 fi
 
 # --- Detect what works on this host -----------------------------------------
@@ -192,5 +217,6 @@ if [[ $DRY -eq 0 ]]; then
   echo
   echo "Done. Restart Claude Code (e.g. 'claude --continue') - /mcp only shows servers loaded at session start."
   [[ "$MODE" != "node" ]] && echo "After code changes (git pull), run ./register.sh again to rebuild the image."
+  [[ -n "$FILES_DIR" ]] && echo "Attachment tools read and write files only in $FILES_DIR."
 fi
 exit 0

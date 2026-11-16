@@ -55,7 +55,7 @@ The script then checks the API key against the server, replaces any existing reg
 ./register.sh --yes                                      # take the recommendation without asking
 ./register.sh --mode docker                              # pick a mode yourself
 ./register.sh --name planka-me --config ~/.planka-me     # second identity (another user's API key)
-./register.sh --files-dir ~/planka-files                 # folder for attachment uploads/downloads (mounted as /files in containers)
+./register.sh --files-dir ~/planka-files                 # attachment folder (default: <repo>/attachments; "none" = no folder)
 ./register.sh --dry-run                                  # show what would happen
 ```
 ```powershell
@@ -217,12 +217,7 @@ The server runs in a throwaway container (`docker run --rm`), so it only sees th
 | Uploads from `filePath` | no: host files aren't visible in the container |
 | Downloads with `savePath` | no: the file is written inside the container and lost when it exits |
 
-**Setup:** mount a folder, for example `attachments/` next to `.planka`:
-
-```bash
-mkdir -p attachments && chmod 700 attachments
-./register.sh --files-dir ./attachments
-```
+**Setup:** none needed. `./register.sh` uses `<repo>/attachments` and creates it with mode 700 if it's missing. To use another folder, pass `--files-dir DIR` or set `FILES_DIR=` in `.planka`. `--files-dir none` registers no folder.
 
 `register.sh` turns the path into an absolute one and adds `-v <repo>/attachments:/files:rw -e PLANKA_FILES_DIR=/files` to the `docker run` command (Podman: `rw,z` for SELinux).
 
@@ -234,8 +229,9 @@ mkdir -p attachments && chmod 700 attachments
 **Good to know:**
 - **Ownership:** files the server saves belong to root, because the container runs as root. With rootless Podman they belong to your user.
 - **Kept out of git:** `attachments/` is in `.gitignore`, so downloads are never committed, for example by a script that runs `git add -A`, and never mirrored.
-- **Pass `--files-dir` every time:** re-running `./register.sh` replaces the registration, so pass `--files-dir` again after each `git pull` and rebuild. Without it, the mount is gone.
-- **Node mode:** the server uses your own filesystem, so no mount is needed. `--files-dir` there only sets `PLANKA_FILES_DIR` to limit file access to that folder.
+- **Re-running is enough:** after a `git pull`, `./register.sh` picks the same folder again: `--files-dir`, else `PLANKA_FILES_DIR`, else `FILES_DIR` in `.planka`, else `<repo>/attachments`.
+- **Node mode:** the server uses your own filesystem, so no mount is needed. The folder only sets `PLANKA_FILES_DIR` to limit file access to it.
+- **Config permissions:** if `.planka` is readable by others and belongs to you, `register.sh` changes it to mode 600, since it holds the API key.
 
 ## Notifications & two-way comments
 

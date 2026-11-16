@@ -1,7 +1,9 @@
 /**
- * Change tracking for "notifications": new cards in Backlog lists and new comments by humans.
+ * Change tracking for "notifications": new cards in Backlog lists, cards moved between lists, ticked or
+ * unticked tasks, cards labelled START (requests to start work), and new comments by humans.
  * Planka has no "changes since" API for this, so we keep a per-board snapshot
- * (card → listId + commentsTotal) and diff against it on every check.
+ * (card → listId + commentsTotal + completed task IDs) and diff against it on every check.
+ * Who moved a card or ticked a task comes from the card's action log, so our own changes are skipped.
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -18,6 +20,24 @@ export interface BacklogCardEvent {
   name: string;
   /** true if an existing card was moved into the backlog, false if newly created there. */
   movedIn: boolean;
+  /** For moved-in cards: the list it came from. */
+  fromList?: string;
+  by?: string;
+  at: string;
+}
+
+/** A card moved to another list (other than a backlog list, which gives a backlog_card event) by someone else. */
+export interface CardMovedEvent {
+  type: "card_moved";
+  boardId: string;
+  board: string;
+  cardId: string;
+  name: string;
+  fromListId: string;
+  fromList: string;
+  listId: string;
+  list: string;
+  /** Who moved it, when Planka's card actions say so. */
   by?: string;
   at: string;
 }
@@ -36,11 +56,52 @@ export interface CommentEvent {
   at: string;
 }
 
-export type UpdateEvent = BacklogCardEvent | CommentEvent;
+/** A task (checkbox) on a card was ticked or unticked by someone else. */
+export interface TaskEvent {
+  type: "task";
+  boardId: string;
+  board: string;
+  list: string;
+  cardId: string;
+  card: string;
+  taskId: string;
+  task: string;
+  taskList?: string;
+  completed: boolean;
+  by?: string;
+  at: string;
+}
+
+/**
+ * A card carries the start label (default "START"): a request to start working on it now. Reported once
+ * when the label appears, and also on a board's first check, since it's pending work, not old activity.
+ */
+export interface StartRequestEvent {
+  type: "start_request";
+  boardId: string;
+  board: string;
+  listId: string;
+  list: string;
+  cardId: string;
+  name: string;
+  /** Label to remove (planka_remove_label_from_card) once the work has started. */
+  labelId: string;
+  label: string;
+  at: string;
+}
+
+export type UpdateEvent = BacklogCardEvent | CardMovedEvent | TaskEvent | StartRequestEvent | CommentEvent;
+
+interface CardActions {
+  users: Map<string, string>;
+  items: any[];
+}
 
 interface CardSnap {
   l: string; // listId
   c: number; // commentsTotal
+  d?: string[]; // IDs of completed tasks (missing in state files from before task tracking)
+  s?: 1; // carries the start label
 }
 interface BoardSnap {
   lastCheck: string;
@@ -73,13 +134,16 @@ export class UpdateTracker {
   private me?: string;
   private readonly now: () => Date;
   readonly backlogPattern: RegExp;
+  /** Name of the label that asks to start work on a card (case-insensitive). */
+  readonly startLabel: string;
 
   constructor(
     private readonly client: PlankaClient,
     private readonly statePath: string = defaultStatePath(),
-    opts: { backlogPattern?: RegExp; now?: () => Date } = {},
+    opts: { backlogPattern?: RegExp; startLabel?: string; now?: () => Date } = {},
   ) {
     this.backlogPattern = opts.backlogPattern ?? new RegExp(process.env.PLANKA_BACKLOG_PATTERN || "backlog", "i");
+    this.startLabel = (opts.startLabel ?? process.env.PLANKA_START_LABEL ?? "START").trim() || "START";
     this.now = opts.now ?? (() => new Date());
   }
 
@@ -113,6 +177,21 @@ export class UpdateTracker {
       .map((b: any) => b.id as string);
   }
 
+  /**
+   * A card's action log (newest first), or undefined if it can't be read. Changes are then still
+   * reported, just without an author.
+   */
+  private async cardActions(cardId: string): Promise<CardActions | undefined> {
+    try {
+      const resp = await this.client.get(`/cards/${cardId}/actions`);
+      const users = new Map<string, string>((resp.included?.users ?? []).map((u: any) => [u.id, u.name ?? u.username ?? u.id]));
+      const items = [...(resp.items ?? [])].sort((a: any, b: any) => String(b.createdAt).localeCompare(String(a.createdAt)));
+      return { users, items };
+    } catch {
+      return undefined;
+    }
+  }
+
   async check(opts: CheckOptions = {}): Promise<CheckResult> {
     const me = await this.myUserId();
     const state = this.loadState();
@@ -126,9 +205,39 @@ export class UpdateTracker {
       const lists = new Map<string, any>((inc.lists ?? []).map((l: any) => [l.id, l]));
       const users = new Map<string, string>((inc.users ?? []).map((u: any) => [u.id, u.name ?? u.username ?? u.id]));
       const cards: any[] = inc.cards ?? [];
+      const taskLists = new Map<string, any>((inc.taskLists ?? []).map((t: any) => [t.id, t]));
+      const tasksByCard = new Map<string, any[]>();
+      for (const t of inc.tasks ?? []) {
+        const cardId = taskLists.get(t.taskListId)?.cardId;
+        if (!cardId) continue;
+        if (!tasksByCard.has(cardId)) tasksByCard.set(cardId, []);
+        tasksByCard.get(cardId)!.push(t);
+      }
+      // Cards carrying the start label: cardId -> the card-label link.
+      const startLabels = new Map<string, any>(
+        (inc.labels ?? [])
+          .filter((l: any) => String(l.name ?? "").trim().toLowerCase() === this.startLabel.toLowerCase())
+          .map((l: any) => [l.id, l]),
+      );
+      const startOf = new Map<string, any>();
+      for (const cl of inc.cardLabels ?? []) if (startLabels.has(cl.labelId)) startOf.set(cl.cardId, cl);
+
       const prev = state.boards[boardId];
       const snap: BoardSnap = { lastCheck: checkedAt, cards: {} };
-      for (const c of cards) snap.cards[c.id] = { l: c.listId, c: c.commentsTotal ?? 0 };
+      for (const c of cards) {
+        const done = (tasksByCard.get(c.id) ?? []).filter((t) => t.isCompleted).map((t) => t.id as string).sort();
+        snap.cards[c.id] = { l: c.listId, c: c.commentsTotal ?? 0, d: done, ...(startOf.has(c.id) ? { s: 1 as const } : {}) };
+      }
+
+      // Start requests: newly labelled cards, and on a board's first check every labelled card (pending work).
+      for (const c of cards) {
+        const cl = startOf.get(c.id);
+        if (!cl || (prev && prev.cards[c.id]?.s)) continue;
+        result.events.push({
+          type: "start_request", boardId, board: board.name, listId: c.listId, list: lists.get(c.listId)?.name ?? "",
+          cardId: c.id, name: c.name, labelId: cl.labelId, label: startLabels.get(cl.labelId).name, at: cl.createdAt ?? checkedAt,
+        });
+      }
 
       if (!prev) {
         // First sight of this board: establish a baseline without flooding old activity.
@@ -143,21 +252,61 @@ export class UpdateTracker {
         const list = lists.get(c.listId);
         const listName: string = list?.name ?? "";
 
-        // New card in (or moved into) a backlog list.
-        if (this.backlogPattern.test(listName) && (!before || before.l !== c.listId)) {
-          const movedIn = !!before;
-          if (movedIn || c.creatorUserId !== me) {
+        const isBacklog = this.backlogPattern.test(listName);
+        const moved = !!before && before.l !== c.listId;
+        // The action log is fetched at most once per card, and only when something needs an author.
+        let actions: CardActions | undefined | null = null;
+        const getActions = async () => (actions === null ? (actions = await this.cardActions(c.id)) : actions);
+        const nameOf = (a: CardActions | undefined, userId?: string) =>
+          userId ? (a?.users.get(userId) ?? users.get(userId)) : undefined;
+
+        if (moved) {
+          // Moved to another list since the last check. Skip our own moves.
+          const a = await getActions();
+          const move = a?.items.find((x) => x.type === "moveCard");
+          if (move?.userId !== me) {
+            const fromList = move?.data?.fromList?.name ?? lists.get(before.l)?.name ?? before.l;
+            const by = nameOf(a, move?.userId);
+            const at = c.listChangedAt ?? move?.createdAt ?? checkedAt;
+            if (isBacklog) {
+              result.events.push({
+                type: "backlog_card", boardId, board: board.name, listId: c.listId, list: listName,
+                cardId: c.id, name: c.name, movedIn: true, fromList, by, at,
+              });
+            } else {
+              result.events.push({
+                type: "card_moved", boardId, board: board.name, cardId: c.id, name: c.name,
+                fromListId: before.l, fromList, listId: c.listId, list: listName, by, at,
+              });
+            }
+          }
+        } else if (isBacklog && !before && c.creatorUserId !== me) {
+          // New card created in a backlog list by someone else.
+          result.events.push({
+            type: "backlog_card", boardId, board: board.name, listId: c.listId, list: listName,
+            cardId: c.id, name: c.name, movedIn: false, by: users.get(c.creatorUserId), at: c.createdAt ?? checkedAt,
+          });
+        }
+
+        // Tasks ticked or unticked since the last check (needs a task baseline for this card).
+        if (before?.d) {
+          const wasDone = new Set(before.d);
+          const nowDone = new Set(snap.cards[c.id].d);
+          // Only tasks that existed at the last check: a task created already ticked is not a tick.
+          const changed = (tasksByCard.get(c.id) ?? []).filter(
+            (t) => wasDone.has(t.id) !== nowDone.has(t.id) && String(t.createdAt ?? "") <= prev.lastCheck,
+          );
+          for (const t of changed) {
+            const completed = nowDone.has(t.id);
+            const a = await getActions();
+            const act = a?.items.find(
+              (x) => (x.type === "completeTask" || x.type === "uncompleteTask") && x.data?.task?.id === t.id,
+            );
+            if (act?.userId === me) continue;
             result.events.push({
-              type: "backlog_card",
-              boardId,
-              board: board.name,
-              listId: c.listId,
-              list: listName,
-              cardId: c.id,
-              name: c.name,
-              movedIn,
-              by: movedIn ? undefined : users.get(c.creatorUserId),
-              at: (movedIn ? c.listChangedAt : c.createdAt) ?? checkedAt,
+              type: "task", boardId, board: board.name, list: listName, cardId: c.id, card: c.name,
+              taskId: t.id, task: t.name, taskList: taskLists.get(t.taskListId)?.name, completed,
+              by: nameOf(a, act?.userId), at: act?.createdAt ?? t.updatedAt ?? checkedAt,
             });
           }
         }

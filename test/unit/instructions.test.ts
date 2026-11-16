@@ -47,6 +47,18 @@ describe("DEFAULT_INSTRUCTIONS", () => {
     expect(DEFAULT_INSTRUCTIONS).toMatch(/No match: ask the user once whether to create the project/);
   });
 
+  it("START-labelled cards come first: move to In Progress, then remove the label", () => {
+    expect(DEFAULT_INSTRUCTIONS).toMatch(/priority order: first cards labelled START, then cards already under way/);
+    const rule = DEFAULT_INSTRUCTIONS.split("\n").find((l) => l.startsWith("- START label:")) ?? "";
+    expect(rule).toMatch(/start_request/);
+    expect(rule).toMatch(/move it to In Progress, remove the START label with planka_remove_label_from_card/);
+    expect(rule).toMatch(/only after the card is in In Progress/);
+  });
+
+  it("tells the assistant to handle moved cards and ticked tasks from check_updates", () => {
+    expect(DEFAULT_INSTRUCTIONS).toMatch(/Session start:.*card_moved.*task/s);
+  });
+
   it("reminds the user at session start how to enable automatic checks, without starting them", () => {
     const rule = DEFAULT_INSTRUCTIONS.split("\n").find((l) => l.includes("automatic checking is off")) ?? "";
     expect(rule).toMatch(/session start/i);

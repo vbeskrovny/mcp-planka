@@ -9,8 +9,10 @@ export function registerUpdateTools(server: McpServer, tracker: UpdateTracker) {
     {
       title: "Check for updates",
       description:
-        "Notifications since the last check: new cards in Backlog lists (created or moved in) and new comments " +
-        "written by people other than you. The first check of a board only records a baseline. " +
+        "Notifications since the last check: new cards in Backlog lists (created or moved in), cards moved to " +
+        "another list (card_moved, with from/to list and who moved it), tasks ticked or unticked (task, completed " +
+        "true/false), cards labelled START (start_request: start work on it now, then remove that labelId), and new " +
+        "comments written by people other than you. Your own changes are not reported. The first check of a board only records a baseline. " +
         "Reply to a comment with planka_add_comment on the same cardId to talk back on the card.",
       inputSchema: {
         projectId: id("Only check boards of this project").optional(),

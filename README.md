@@ -1,6 +1,6 @@
 # mcp-planka
 
-MCP server for [Planka](https://planka.app) **v2** kanban boards. It lets an AI assistant browse boards and manage cards, comments, checklists and labels. It can also report **new Backlog cards** and **new comments from people**, so you can talk with the assistant through card comments in both directions.
+MCP server for [Planka](https://planka.app) **v2** kanban boards. It lets an AI assistant browse boards and manage cards, comments, checklists and labels. It can also report **new Backlog cards**, **cards people moved**, **ticked tasks**, **cards labelled START** and **new comments from people**, so you can talk with the assistant through card comments in both directions.
 
 It is a standard [Model Context Protocol](https://modelcontextprotocol.io) server over stdio, built on the official MCP SDK, with no dependency on a particular AI vendor. Any MCP client can use it: see [Other MCP clients](#other-mcp-clients).
 
@@ -29,6 +29,7 @@ KEY=<api key>
 | `PLANKA_FILES_DIR` / `FILES_DIR=` in `.planka` | If set, the attachment tools only read and write local files inside this directory. Relative paths start there. Unset: any path the server process can access, relative to its working directory |
 | `PLANKA_STATE_DIR` | Where update-tracking snapshots are stored (default `~/.mcp-planka`) |
 | `PLANKA_BACKLOG_PATTERN` | Regex (case-insensitive) that marks a list as a backlog (default `backlog`) |
+| `PLANKA_START_LABEL` | Name of the label that asks the assistant to start a card now (case-insensitive, default `START`) |
 | `PLANKA_WATCH_INTERVAL` | Poll seconds for the watcher (default 60, min 10) |
 
 To create an API key in Planka v2, open your user settings and go to API key. Requests send it in the `X-Api-Key` header.
@@ -142,7 +143,7 @@ Check that it works by asking the assistant to "call planka_whoami". To test the
 | Comments | `planka_add_comment`, `planka_update_comment`, `planka_delete_comment` | |
 | Tasks | `planka_create_task_list`, `planka_add_task`, `planka_update_task`, `planka_delete_task` | |
 | Labels | `planka_create_label`, `planka_add_label_to_card`, `planka_remove_label_from_card` | 42 Planka color names |
-| Updates | `planka_check_updates` | New Backlog cards and new human comments since the last check |
+| Updates | `planka_check_updates` | New Backlog cards, moved cards, ticked/unticked tasks, START labels and new human comments since the last check |
 | Delete | `planka_delete_list`, `planka_delete_board`, `planka_delete_project` | **Two-step:** without `confirm` they only return a preview. They delete only when `confirm` is the item's exact name (see below) |
 | Access | `planka_sync_board_members` | Adds project managers as board members (editor by default) so they can comment. **Dry run by default** |
 
@@ -235,10 +236,17 @@ The server runs in a throwaway container (`docker run --rm`), so it only sees th
 
 ## Notifications & two-way comments
 
-The tracker saves a snapshot of every board (each card's list and comment count) and reports what changed since then:
+**Start a card from Planka:** add a label named `START` to any card. With the built-in instructions, the assistant handles START cards first. It moves the card to In Progress, then removes the label and comments that work has started. The label is removed only after the move, so a request is never lost. At session start the assistant also looks for START cards on the board, which covers labels added while no session was running.
 
-- `backlog_card`: a card was created in a list matching `PLANKA_BACKLOG_PATTERN`, or moved into one. Cards the API-key user created are ignored.
+The tracker saves a snapshot of every board (each card's list, comment count and ticked tasks) and reports what changed since then:
+
+- `backlog_card`: a card was created in a list matching `PLANKA_BACKLOG_PATTERN`, or moved into one (then with `fromList` and `by`). Cards the API-key user created are ignored.
+- `card_moved`: a card was moved to any other list, with `fromList`, `list` and `by`.
+- `task`: a task (checkbox) was ticked (`completed: true`) or unticked (`completed: false`), with `by`. Tasks created already ticked don't count.
+- `start_request`: a card carries the `START` label (`PLANKA_START_LABEL`), with its `labelId`. This is reported once when the label appears, and also on a board's first check, because it's pending work, not old activity.
 - `comment`: a new comment by **anyone except the API-key user**. The assistant's own replies therefore never trigger events.
+
+Who moved a card or ticked a task comes from the card's action log (`GET /cards/:id/actions`), so the assistant's own moves and ticks are skipped too. If the log can't be read, the change is still reported, without `by`. After an upgrade, task changes are reported from the second check of a board on, because the first check records the current ticks.
 
 The first check of a board only records a baseline. Replies go back with `planka_add_comment` on the same `cardId`, which gives you a conversation inside the card.
 

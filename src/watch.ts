@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Poll Planka and print one JSON line per event (new backlog card / new human comment).
+ * Poll Planka and print one JSON line per event (new backlog card / card moved / task ticked / START label / new human comment).
  * Usage: mcp-planka-watch [--interval 60] [--project <id>] [--board <id> ...] [--once]
  * Designed to be followed by Claude Code's Monitor tool, or piped into any notifier.
  */

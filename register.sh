@@ -2,12 +2,13 @@
 # Register mcp-planka with Claude Code (default: user scope = available in all projects).
 #
 # Usage: ./register.sh [--mode auto|node|docker|podman] [--yes] [--name planka]
-#                      [--scope user|local|project] [--config /path/.planka] [--files-dir DIR] [--dry-run]
+#                      [--scope user|local|project] [--config /path/.env] [--files-dir DIR] [--dry-run]
 #   --mode     how to run the server; auto (default) tests what works here, recommends one and asks
 #   --yes      take the recommended mode without asking (also used when there is no terminal)
-#   --config   use a specific .planka file (e.g. another user's API key); default: .planka in the repo
+#   --config   use a specific config file (e.g. another user's API key); default: .env in the repo.
+#              An old .planka (URL= / KEY= ...) is migrated to .env with PLANKA_ keys and then deleted.
 #   --files-dir  folder the attachment tools may read/write (PLANKA_FILES_DIR); mounted as /files in containers.
-#              Default: PLANKA_FILES_DIR, else FILES_DIR in the config file, else <repo>/attachments
+#              Default: PLANKA_FILES_DIR from the environment, else from the config file, else <repo>/attachments
 #              (created, mode 700).
 #              "none" = no folder (Node: any path the server can access; containers: no host files)
 #   --dry-run  print what would be done, change nothing
@@ -31,7 +32,7 @@ while [[ $# -gt 0 ]]; do
     --config)  CONFIG="$2"; shift 2 ;;
     --files-dir) FILES_DIR="$2"; shift 2 ;;
     --dry-run) DRY=1; shift ;;
-    -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -45,13 +46,24 @@ case "$MODE" in auto|node|docker|podman) ;; *) die "--mode must be auto, node, d
 command -v claude >/dev/null || die "claude CLI not found (install Claude Code first: https://docs.claude.com/claude-code)"
 
 # --- Config file -------------------------------------------------------------
+# Old format: .planka with URL= / KEY= / MANAGERS= / INSTRUCTIONS= / FILES_DIR=. New: .env with PLANKA_ keys.
+MIGRATE="$ROOT/scripts/migrate-config.sh"
+has_legacy_keys() { grep -qE '^[[:space:]]*(URL|KEY|MANAGERS|INSTRUCTIONS|FILES_DIR)[[:space:]]*=' "$1"; }
+migrate() { # $1 = from, $2 = to
+  if [[ $DRY -eq 1 ]]; then echo "[dry-run] migrate $1 -> $2 (PLANKA_ keys)" >&2; else bash "$MIGRATE" "$1" "$2"; fi
+}
 if [[ -n "$CONFIG" ]]; then
   CONFIG="$(cd "$(dirname "$CONFIG")" && pwd -P)/$(basename "$CONFIG")"
   [[ -f "$CONFIG" ]] || die "config file not found: $CONFIG"
-elif [[ -f "$ROOT/.planka" ]]; then
-  CONFIG="$ROOT/.planka"
-elif [[ -z "${PLANKA_URL:-}" || -z "${PLANKA_API_KEY:-}" ]]; then
-  die "no $ROOT/.planka (URL=... / KEY=... / MANAGERS=...) and PLANKA_URL/PLANKA_API_KEY not set"
+  if has_legacy_keys "$CONFIG"; then migrate "$CONFIG" "$CONFIG"; fi
+else
+  if [[ -f "$ROOT/.planka" ]]; then migrate "$ROOT/.planka" "$ROOT/.env"; fi
+  if [[ -f "$ROOT/.env" ]] && has_legacy_keys "$ROOT/.env"; then migrate "$ROOT/.env" "$ROOT/.env"; fi
+  if [[ -f "$ROOT/.env" || ( $DRY -eq 1 && -f "$ROOT/.planka" ) ]]; then
+    CONFIG="$ROOT/.env"
+  elif [[ -z "${PLANKA_URL:-}" || -z "${PLANKA_API_KEY:-}" ]]; then
+    die "no $ROOT/.env (PLANKA_URL=... / PLANKA_API_KEY=... / PLANKA_MANAGERS=...) and PLANKA_URL/PLANKA_API_KEY not set"
+  fi
 fi
 # The config holds the API key: make it private to its owner (only if it is ours to change).
 if [[ -n "$CONFIG" ]]; then
@@ -65,12 +77,11 @@ if [[ -n "$CONFIG" ]]; then
   fi
 fi
 
-# Folder for attachment uploads/downloads: --files-dir, else PLANKA_FILES_DIR, else FILES_DIR from the config,
-# else <repo>/attachments.
-config_value() { if [[ -n "$CONFIG" ]]; then sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$CONFIG" | tr -d '\r' | tail -1; fi; }
+# Folder for attachment uploads/downloads: --files-dir, else PLANKA_FILES_DIR from the environment, else from
+# the config file, else <repo>/attachments.
+config_value() { if [[ -f "$CONFIG" ]]; then sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$CONFIG" | tr -d '\r' | tail -1; fi; }
 if [[ -z "$FILES_DIR" ]]; then
   FILES_DIR="${PLANKA_FILES_DIR:-}"
-  [[ -n "$FILES_DIR" ]] || FILES_DIR="$(config_value FILES_DIR)"
   [[ -n "$FILES_DIR" ]] || FILES_DIR="$(config_value PLANKA_FILES_DIR)"
   [[ -n "$FILES_DIR" ]] || FILES_DIR="$ROOT/attachments"
 fi
@@ -182,9 +193,9 @@ else
   RT="$MODE"
   echo "Building image $IMAGE with $RT..."
   run "$RT" build -q -t "$IMAGE" "$ROOT" >/dev/null
-  [[ -n "$CONFIG" ]] || die "$RT mode needs a .planka file (env-only config isn't passed into the container)"
+  [[ -n "$CONFIG" ]] || die "$RT mode needs a .env file (env-only config isn't passed into the container)"
   VOL_OPTS="ro"; [[ "$RT" == "podman" ]] && VOL_OPTS="ro,z"   # z: SELinux relabel for Podman hosts
-  RUN_ARGS=(run -i --rm --pull=never -v "$CONFIG:/app/.planka:$VOL_OPTS" -v mcp-planka-state:/data)
+  RUN_ARGS=(run -i --rm --pull=never -v "$CONFIG:/app/.env:$VOL_OPTS" -v mcp-planka-state:/data)
   if [[ -n "$FILES_DIR" ]]; then
     FILES_OPTS="rw"; [[ "$RT" == "podman" ]] && FILES_OPTS="rw,z"
     RUN_ARGS+=(-v "$FILES_DIR:/files:$FILES_OPTS" -e PLANKA_FILES_DIR=/files)

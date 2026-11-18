@@ -1,6 +1,6 @@
 # mcp-planka: stdio MCP server for Planka v2.
 # Run (config is mounted, never baked in):
-#   docker run -i --rm -v /path/.planka:/app/.planka:ro -v mcp-planka-state:/data mcp-planka
+#   docker run -i --rm -v /path/.env:/app/.env:ro -v mcp-planka-state:/data mcp-planka
 FROM node:22-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -12,7 +12,7 @@ RUN npm run build && npm prune --omit=dev
 FROM node:22-alpine
 WORKDIR /app
 ENV NODE_ENV=production \
-    PLANKA_CONFIG=/app/.planka \
+    PLANKA_CONFIG=/app/.env \
     PLANKA_STATE_DIR=/data
 COPY --from=build /app/package.json ./
 COPY --from=build /app/node_modules ./node_modules

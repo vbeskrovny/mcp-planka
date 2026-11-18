@@ -5,10 +5,12 @@
   Uses Windows Node (>= 20) if available, otherwise runs the server with Node inside WSL.
   WSL's Node is located by absolute path (nvm, fnm, volta etc. only set PATH in interactive
   shells), and registered as "wsl.exe -e <node> <entry>", so no shell setup is needed at runtime.
+  Config: .env in the repo (PLANKA_URL=..., PLANKA_API_KEY=...), or -Config <file>. An old .planka
+  (URL= / KEY= ...) is migrated to .env with PLANKA_ keys and then deleted.
   If you use Claude Code inside WSL, run ./register.sh there instead.
 .EXAMPLE
   .\register.ps1
-  .\register.ps1 -Name planka-me -Config C:\keys\.planka-me
+  .\register.ps1 -Name planka-me -Config C:\keys\planka-me.env
   .\register.ps1 -ForceWsl -Distro Debian
   .\register.ps1 -DryRun
 #>
@@ -51,10 +53,27 @@ $Root  = (Resolve-Path $PSScriptRoot).Path
 $Entry = Join-Path $Root "dist\index.js"
 if (-not (Get-Command claude -ErrorAction SilentlyContinue)) { throw "claude CLI not found in PATH" }
 
+# Old format: .planka with URL= / KEY= / ... New: .env with PLANKA_ keys.
+$Migrate = Join-Path $Root "scripts\migrate-config.ps1"
+function HasLegacyKeys([string]$Path) {
+  return [bool](Select-String -LiteralPath $Path -Pattern '^\s*(URL|KEY|MANAGERS|INSTRUCTIONS|FILES_DIR)\s*=' -Quiet)
+}
+function MigrateConfig([string]$From, [string]$To) {
+  if ($DryRun) { Write-Host "[dry-run] migrate $From -> $To (PLANKA_ keys)"; return }
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Migrate -Src $From -Dest $To
+  if ($LASTEXITCODE -ne 0) { throw "config migration failed ($LASTEXITCODE)" }
+}
+$EnvFile = Join-Path $Root ".env"
 if ($Config) {
   $Config = (Resolve-Path $Config).Path
-} elseif (-not (Test-Path (Join-Path $Root ".planka")) -and -not ($env:PLANKA_URL -and $env:PLANKA_API_KEY)) {
-  throw "No $Root\.planka (URL=... / KEY=...) and PLANKA_URL/PLANKA_API_KEY not set"
+  if (HasLegacyKeys $Config) { MigrateConfig $Config $Config }
+} else {
+  $Legacy = Join-Path $Root ".planka"
+  if (Test-Path $Legacy) { MigrateConfig $Legacy $EnvFile }
+  if ((Test-Path $EnvFile) -and (HasLegacyKeys $EnvFile)) { MigrateConfig $EnvFile $EnvFile }
+  if (-not (Test-Path $EnvFile) -and -not ($DryRun -and (Test-Path $Legacy)) -and -not ($env:PLANKA_URL -and $env:PLANKA_API_KEY)) {
+    throw "No $EnvFile (PLANKA_URL=... / PLANKA_API_KEY=...) and PLANKA_URL/PLANKA_API_KEY not set"
+  }
 }
 
 $WinNode = Get-Command node -ErrorAction SilentlyContinue

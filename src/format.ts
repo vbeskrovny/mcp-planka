@@ -2,6 +2,8 @@
  * Compact formatters: turn Planka's normalized `{item, included}` payloads into small,
  * nested JSON that is cheap for a model to read. IDs stay strings.
  */
+import { cardPasses, hasDueFilter, selectLists, type CardFilter, type DescriptionMode } from "./filters.js";
+
 type Rec = Record<string, any>;
 const byPos = (a: Rec, b: Rec) => (a.position ?? 0) - (b.position ?? 0);
 const HIDDEN_LIST_TYPES = new Set(["archive", "trash"]);
@@ -68,6 +70,12 @@ export function truncate(s: string | null | undefined, max: number): string | un
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
 
+/** A card's description per mode: a short preview (true), all of it ("full") or nothing. */
+function describe(text: string | null | undefined, mode: DescriptionMode | undefined, max = 160) {
+  if (!mode) return undefined;
+  return mode === "full" ? text?.trim() || undefined : truncate(text, max);
+}
+
 export function formatProjects(resp: Rec) {
   const boards: Rec[] = resp.included?.boards ?? [];
   return (resp.items ?? []).map((p: Rec) =>
@@ -93,10 +101,14 @@ function taskProgress(cardId: string, taskLists: Rec[], tasks: Rec[]) {
 export interface FormatBoardOptions {
   /** Include archive/trash lists (hidden by default). */
   includeArchived?: boolean;
-  /** Include a short description preview per card. */
-  includeDescriptions?: boolean;
+  /** Description per card: true = short preview, "full" = complete text. */
+  includeDescriptions?: DescriptionMode;
   /** Only keep cards with these labels; lists without matching cards are left out. */
   labelFilter?: LabelFilter;
+  /** Only these lists (IDs or names, case-insensitive); named archive/trash lists are included too. */
+  lists?: string[];
+  /** Card filter. closed: false also leaves out lists of type "closed"; closed: true leaves out lists without closed cards. */
+  cardFilter?: CardFilter;
 }
 
 export function formatBoard(resp: Rec, opts: FormatBoardOptions = {}) {
@@ -110,9 +122,12 @@ export function formatBoard(resp: Rec, opts: FormatBoardOptions = {}) {
   const tasks: Rec[] = inc.tasks ?? [];
   const cards: Rec[] = [...(inc.cards ?? [])].sort(byPos);
   const project = (inc.projects ?? []).find((p: Rec) => p.id === b.projectId);
+  const listSel = opts.lists?.length ? selectLists(inc.lists ?? [], opts.lists) : undefined;
+  const cf = opts.cardFilter;
 
   const lists = [...(inc.lists ?? [])]
-    .filter((l: Rec) => opts.includeArchived || !HIDDEN_LIST_TYPES.has(l.type))
+    .filter((l: Rec) => (listSel ? listSel.ids.has(l.id) : opts.includeArchived || !HIDDEN_LIST_TYPES.has(l.type)))
+    .filter((l: Rec) => !(cf?.closed === false && l.type === "closed"))
     .sort(byPos)
     .map((l: Rec) =>
       compact({
@@ -120,7 +135,7 @@ export function formatBoard(resp: Rec, opts: FormatBoardOptions = {}) {
         name: l.name,
         type: l.type === "active" ? undefined : l.type,
         cards: cards
-          .filter((c) => c.listId === l.id && (!filtered || filtered.cardIds.has(c.id)))
+          .filter((c) => c.listId === l.id && (!filtered || filtered.cardIds.has(c.id)) && cardPasses(c, l, cf))
           .map((c) =>
             compact({
               id: c.id,
@@ -131,7 +146,7 @@ export function formatBoard(resp: Rec, opts: FormatBoardOptions = {}) {
               dueDone: c.dueDate ? c.isDueCompleted : undefined,
               comments: c.commentsTotal || undefined,
               closed: c.isClosed,
-              description: opts.includeDescriptions ? truncate(c.description, 160) : undefined,
+              description: describe(c.description, opts.includeDescriptions),
             }),
           ),
       }),
@@ -151,7 +166,9 @@ export function formatBoard(resp: Rec, opts: FormatBoardOptions = {}) {
           missingLabels: filtered.missing,
         })
       : undefined,
-    lists: filtered ? lists.filter((l: Rec) => l.cards?.length) : lists,
+    listFilter: listSel ? compact({ lists: opts.lists, missingLists: listSel.missing }) : undefined,
+    // Card filters that select cards (labels, closed: true, due) leave out lists with no matching card.
+    lists: filtered || cf?.closed === true || hasDueFilter(cf) ? lists.filter((l: Rec) => l.cards?.length) : lists,
   });
 }
 
@@ -222,20 +239,29 @@ export interface SearchHit {
   list: string;
   cardId: string;
   name: string;
-  matchedIn: "name" | "description" | "labels";
+  /** "labels" / "filter": no query; the card was selected by labels or by the other filters only. */
+  matchedIn: "name" | "description" | "labels" | "filter";
   labels?: string[];
+  due?: string;
+  dueDone?: boolean;
+  closed?: boolean;
   snippet?: string;
+  description?: string;
+}
+
+export interface SearchBoardOptions {
+  includeArchived?: boolean;
+  labelFilter?: LabelFilter;
+  cardFilter?: CardFilter;
+  includeDescriptions?: DescriptionMode;
 }
 
 /**
- * Find cards on one board by text (name/description, case-insensitive) and/or labels. With only a
- * label filter, every card carrying the labels is a hit (matchedIn "labels").
+ * Find cards on one board by text (name/description, case-insensitive), labels and/or card filters
+ * (closed state, due date). Without a query, every card passing the filters is a hit (matchedIn
+ * "labels" when a label filter was given, else "filter").
  */
-export function searchBoard(
-  resp: Rec,
-  query: string | undefined,
-  opts: { includeArchived?: boolean; labelFilter?: LabelFilter } = {},
-): SearchHit[] {
+export function searchBoard(resp: Rec, query: string | undefined, opts: SearchBoardOptions = {}): SearchHit[] {
   const q = query?.toLowerCase();
   const inc = resp.included ?? {};
   const filtered = opts.labelFilter?.labels.length ? matchLabels(resp, opts.labelFilter) : undefined;
@@ -250,6 +276,7 @@ export function searchBoard(
     const list = lists.get(c.listId);
     if (!opts.includeArchived && list && HIDDEN_LIST_TYPES.has(list.type)) continue;
     if (filtered && !filtered.cardIds.has(c.id)) continue;
+    if (!cardPasses(c, list, opts.cardFilter)) continue;
     const inName = q ? c.name?.toLowerCase().includes(q) : false;
     const descIdx = q && c.description ? c.description.toLowerCase().indexOf(q) : -1;
     if (q && !inName && descIdx < 0) continue;
@@ -260,9 +287,14 @@ export function searchBoard(
       list: list?.name ?? c.listId,
       cardId: c.id,
       name: c.name,
-      matchedIn: !q ? "labels" : inName ? "name" : "description",
+      matchedIn: q ? (inName ? "name" : "description") : filtered ? "labels" : "filter",
       ...(labels.length ? { labels } : {}),
+      ...(c.dueDate ? { due: c.dueDate, ...(c.isDueCompleted ? { dueDone: true } : {}) } : {}),
+      ...(c.isClosed || list?.type === "closed" ? { closed: true } : {}),
       snippet: !q || inName ? undefined : truncate(c.description.slice(Math.max(0, descIdx - 40), descIdx + 80), 120),
+      ...(opts.includeDescriptions && c.description?.trim()
+        ? { description: describe(c.description, opts.includeDescriptions) }
+        : {}),
     });
   }
   return hits;

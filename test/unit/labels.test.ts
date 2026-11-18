@@ -186,9 +186,9 @@ describe("planka_search_cards / planka_get_board with labels", () => {
     expect(r.data.results.length).toBeGreaterThan(0);
   });
 
-  it("needs query or labels; a single unreadable board is an error", async () => {
+  it("needs query, labels or another filter; a single unreadable board is an error", async () => {
     const { call } = await connect(fakePlanka(routes).client);
-    expect((await call("planka_search_cards", {})).text).toMatch(/query, labels or both/);
+    expect((await call("planka_search_cards", {})).text).toMatch(/Give query, labels, a due filter .* or closed/);
     expect((await call("planka_search_cards", { boardId: "30", labels: ["x"] })).isError).toBe(true);
   });
 

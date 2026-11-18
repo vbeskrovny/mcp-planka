@@ -149,7 +149,7 @@ Check that it works by asking the assistant to "call planka_whoami". To test the
 
 | Area | Tool | Notes |
 |---|---|---|
-| Browse | `planka_whoami`, `planka_list_projects`, `planka_get_board`, `planka_get_card`, `planka_search_cards` | Read-only. The output is compact JSON. Search and `get_board` can filter by labels, see [Searching and filtering by labels](#searching-and-filtering-by-labels) |
+| Browse | `planka_whoami`, `planka_list_projects`, `planka_get_board`, `planka_get_card`, `planka_search_cards` | Read-only. The output is compact JSON. Search and `get_board` can filter by labels, lists, closed state and due date, see [Searching and filtering](#searching-and-filtering) |
 | Projects | `planka_find_project`, `planka_create_project`, `planka_update_project`, `planka_create_board` | Find matches names case-insensitively. Create **always** makes a **private** project with an **UPPERCASE** name (`mcp-planka` → `MCP-PLANKA`; there is no shared option; verified: other users, admins included, don't see it). The `MANAGERS` from the config become editors of its board automatically. `update_project` renames a project (also to UPPERCASE), changes or clears its description, and toggles the hide option. It also sets up a default board: Backlog / In Progress / Testing / Done. `create_board` has `addProjectManagers: true` to make the project's managers editors (by default only the creator is a member) |
 | Lists | `planka_create_list`, `planka_update_list`, `planka_move_list` | `type`: `active` / `closed`. `move_list` moves a list and its cards to another board, also in another project (see below) |
 | Cards | `planka_create_card`, `planka_update_card`, `planka_move_card`, `planka_delete_card` | To close a card, move it into a `closed` list. `update_card` sets or clears the cover image (`coverAttachmentId`) |
@@ -185,20 +185,29 @@ What Planka does:
 - card members and task assignees who aren't members of the target board are removed
 - custom fields are detached
 
-## Searching and filtering by labels
+## Searching and filtering
 
-`planka_search_cards` finds cards by text (`query`, in names and descriptions), by labels, or both:
+`planka_search_cards` finds cards by text (`query`, in names and descriptions), labels, due date and closed state. Give at least one of them; any combination works:
 
 | You want | Call |
 |---|---|
 | Cards labelled monitoring **or** todo | `{ labels: ["monitoring", "todo"] }` (`match: "any"` is the default) |
 | Cards labelled monitoring **and** todo | `{ labels: ["monitoring", "todo"], match: "all" }` |
 | Cards labelled monitoring that mention "disk" | `{ query: "disk", labels: ["monitoring"] }` |
+| Cards due in a period | `{ dueFrom: "2026-11-20", dueTo: "2026-11-27" }` |
+| Overdue and not done | `{ dueTo: "<now, ISO date-time>", dueCompleted: false, closed: false }` |
+| Every closed card (incl. Done / Cancelled lists) | `{ closed: true }` |
+| Full descriptions in the results | add `includeDescriptions: "full"` (`true` gives a short preview) |
 | Only in one project / board | add `projectId` or `boardId` |
 
 - **Matching:** label names ignore case, and an unnamed label matches by its color. Each result lists its labels and its board and list. Archive and trash lists are skipped unless `includeArchived: true`.
 - **Typos show up:** `labelsNotFound` names requested labels that exist on none of the searched boards. For a project or board search, `missingLabels` also lists them per board.
-- **`planka_get_board`** takes the same `labels` / `match` filter. It returns only matching cards, leaves out lists without any, and adds `labelFilter` with the number of matches.
+- **Due dates:** bounds are inclusive. A plain date (`2026-11-20`) covers the whole day in UTC; a date-time (`2026-11-20T09:00:00+01:00`) is used as is. Any due filter leaves out cards without a due date. With a due filter, results are sorted by due date across all searched boards, so `limit` keeps the earliest ones. Results carry `due`, `dueDone` and `closed`.
+- **Closed:** a card counts as closed when it is closed itself or sits in a list of type "closed" (e.g. Done).
+- **`planka_get_board`** takes the same `labels` / `match` filter. It returns only matching cards, leaves out lists without any, and adds `labelFilter` with the number of matches. It also takes:
+  - `lists`: only these lists, by name (ignoring case) or ID. A named archive/trash list is included too. `listFilter.missingLists` names entries that matched no list.
+  - `closed: false`: leaves out closed cards and lists of type "closed", so a board read doesn't grow with Done/Cancelled. Empty open lists are kept, so their IDs stay available. `closed: true` returns only closed cards.
+  - `includeDescriptions: "full"` for complete card descriptions (`true` gives a 160-character preview).
 
 **Search only reads your own private projects.** The search only reads **private projects owned by the API-key user**. Some projects are never read, so their content can't leak into results:
 - **Shared projects.**

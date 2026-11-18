@@ -1,17 +1,25 @@
 <#
 .SYNOPSIS
-  Migrate an old-style mcp-planka config (URL= / KEY= / MANAGERS= / INSTRUCTIONS= / FILES_DIR=, usually in
-  .planka) to the .env format, where every setting has the PLANKA_ prefix. Same rules as migrate-config.sh.
+  Migrate an old mcp-planka config (.planka with URL= / KEY= / ..., or .env with PLANKA_<name>=) to the current
+  .env format, where every setting is named MCP_APP_PLANKA_<name>. Same rules as migrate-config.sh.
 .DESCRIPTION
   Src = Dest: rename the keys in place. Otherwise write them into Dest (merged into an existing Dest),
   verify, then delete Src. Never prints values. A key already set in Dest to a different value is a
   conflict: nothing is changed and the script fails. Exit codes: 0 migrated, 3 nothing to migrate, 1 error.
+  -NoBare: only convert PLANKA_<name> keys, not bare URL= / KEY= ... (for a .env shared with other apps).
 #>
-param([Parameter(Mandatory)][string]$Src, [Parameter(Mandatory)][string]$Dest)
+param([Parameter(Mandatory)][string]$Src, [Parameter(Mandatory)][string]$Dest, [switch]$NoBare)
 $ErrorActionPreference = "Stop"
 
-$New = @{ URL = "PLANKA_URL"; KEY = "PLANKA_API_KEY"; MANAGERS = "PLANKA_MANAGERS";
-          INSTRUCTIONS = "PLANKA_INSTRUCTIONS"; FILES_DIR = "PLANKA_FILES_DIR" }
+$P = "MCP_APP_PLANKA_"
+$New = @{}
+if (-not $NoBare) {
+  $New = @{ URL = "${P}URL"; KEY = "${P}API_KEY"; MANAGERS = "${P}MANAGERS"; INSTRUCTIONS = "${P}INSTRUCTIONS";
+            FILES_DIR = "${P}FILES_DIR" }
+}
+foreach ($k in "URL", "API_KEY", "MANAGERS", "INSTRUCTIONS", "FILES_DIR", "STATE_DIR", "BACKLOG_PATTERN", "START_LABEL", "WATCH_INTERVAL") {
+  $New["PLANKA_$k"] = "$P$k"
+}
 $LineRe = '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$'
 
 function Fail([string]$Msg) { [Console]::Error.WriteLine("migrate-config: $Msg"); exit 1 }
@@ -41,7 +49,7 @@ $converted = foreach ($l in $srcLines) {
   } else { $l }
 }
 $converted = @($converted)
-if ($Same -and -not $changed) { Write-Host "migrate-config: $SrcFull already uses PLANKA_ keys"; exit 3 }
+if ($Same -and -not $changed) { Write-Host "migrate-config: nothing to migrate in $SrcFull"; exit 3 }
 
 if ($Same -or -not (Test-Path -LiteralPath $DestFull)) {
   $out = $converted
@@ -74,9 +82,9 @@ $tmp = "$DestFull.migrate.tmp"
 [IO.File]::WriteAllText($tmp, (($out -join "`n") + "`n"))
 Move-Item -LiteralPath $tmp -Destination $DestFull -Force
 if ($Same) {
-  Write-Host "migrate-config: renamed keys in $DestFull to the PLANKA_ names"
+  Write-Host "migrate-config: renamed keys in $DestFull to the MCP_APP_PLANKA_ names"
 } else {
   Remove-Item -LiteralPath $SrcFull -Force
-  Write-Host "migrate-config: moved $SrcFull to $DestFull (PLANKA_ keys) and deleted $SrcFull"
+  Write-Host "migrate-config: moved $SrcFull to $DestFull (MCP_APP_PLANKA_ keys) and deleted $SrcFull"
 }
 exit 0

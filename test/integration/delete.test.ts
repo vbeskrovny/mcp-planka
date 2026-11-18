@@ -1,13 +1,13 @@
 /**
  * Live test for the delete tools. Creates its own temporary project (the API-key user becomes
- * its only manager), so nothing existing is touched. Opt-in: PLANKA_INTEGRATION=1.
+ * its only manager), so nothing existing is touched. Opt-in: MCP_APP_PLANKA_INTEGRATION=1.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PlankaClient } from "../../src/client.js";
 import { loadConfig } from "../../src/config.js";
 import { connect } from "../helpers.js";
 
-describe.runIf(process.env.PLANKA_INTEGRATION === "1")("live delete tools", () => {
+describe.runIf(process.env.MCP_APP_PLANKA_INTEGRATION === "1")("live delete tools", () => {
   let api: PlankaClient;
   let call: Awaited<ReturnType<typeof connect>>["call"];
   const tag = `mcp-del-${Date.now()}`;

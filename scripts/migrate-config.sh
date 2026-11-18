@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
-# Migrate an old-style mcp-planka config (URL= / KEY= / MANAGERS= / INSTRUCTIONS= / FILES_DIR=, usually in
-# .planka) to the .env format, where every setting has the PLANKA_ prefix (PLANKA_URL, PLANKA_API_KEY, ...).
+# Migrate an old mcp-planka config to the current .env format, where every setting is named
+# MCP_APP_PLANKA_<name> (MCP_APP_PLANKA_URL, MCP_APP_PLANKA_API_KEY, ...). Old formats:
+#   - .planka with URL= / KEY= / MANAGERS= / INSTRUCTIONS= / FILES_DIR=
+#   - .env with PLANKA_<name>= (PLANKA_URL, PLANKA_API_KEY, PLANKA_STATE_DIR, ...)
 #
-# Usage: scripts/migrate-config.sh SRC DEST
+# Usage: scripts/migrate-config.sh [--no-bare] SRC DEST
 #   SRC == DEST   rename the keys in place (e.g. a custom --config file)
 #   SRC != DEST   write the keys into DEST (merged into an existing DEST), then delete SRC
+#   --no-bare     only convert PLANKA_<name> keys, not bare URL= / KEY= ... Use it for a .env shared with other
+#                 apps, where bare keys may belong to someone else.
 #
 # Never prints values. DEST is written atomically with mode 600. SRC is deleted only after DEST was
 # verified to hold every setting SRC had. A key already set in DEST to a different value is a conflict:
@@ -13,12 +17,20 @@
 set -euo pipefail
 
 die() { echo "migrate-config: $*" >&2; exit 1; }
-[[ $# -eq 2 ]] || die "usage: migrate-config.sh SRC DEST"
+BARE=1
+if [[ "${1:-}" == "--no-bare" ]]; then BARE=0; shift; fi
+[[ $# -eq 2 ]] || die "usage: migrate-config.sh [--no-bare] SRC DEST"
 SRC="$1"; DEST="$2"
 [[ -f "$SRC" ]] || die "not found: $SRC"
 
-declare -A NEW=([URL]=PLANKA_URL [KEY]=PLANKA_API_KEY [MANAGERS]=PLANKA_MANAGERS
-                [INSTRUCTIONS]=PLANKA_INSTRUCTIONS [FILES_DIR]=PLANKA_FILES_DIR)
+P=MCP_APP_PLANKA_
+declare -A NEW=()
+if [[ $BARE -eq 1 ]]; then
+  NEW=([URL]=${P}URL [KEY]=${P}API_KEY [MANAGERS]=${P}MANAGERS [INSTRUCTIONS]=${P}INSTRUCTIONS [FILES_DIR]=${P}FILES_DIR)
+fi
+for k in URL API_KEY MANAGERS INSTRUCTIONS FILES_DIR STATE_DIR BACKLOG_PATTERN START_LABEL WATCH_INTERVAL; do
+  NEW[PLANKA_$k]="$P$k"
+done
 
 # key_of LINE -> prints the key of a KEY=VALUE line (empty for comments / blank / other lines)
 key_of() {
@@ -56,7 +68,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
 done < "$SRC"
 
 if [[ $same -eq 1 && $changed -eq 0 ]]; then
-  echo "migrate-config: $SRC already uses PLANKA_ keys"; exit 3
+  echo "migrate-config: nothing to migrate in $SRC"; exit 3
 fi
 
 # Build the result: in place -> the converted file; otherwise DEST + converted lines whose key DEST lacks.
@@ -89,8 +101,8 @@ done
 chmod 600 "$out"
 mv -f "$out" "$DEST"; out=""
 if [[ $same -eq 1 ]]; then
-  echo "migrate-config: renamed keys in $DEST to the PLANKA_ names"
+  echo "migrate-config: renamed keys in $DEST to the MCP_APP_PLANKA_ names"
 else
   rm -f "$SRC"
-  echo "migrate-config: moved $SRC to $DEST (PLANKA_ keys, mode 600) and deleted $SRC"
+  echo "migrate-config: moved $SRC to $DEST (MCP_APP_PLANKA_ keys, mode 600) and deleted $SRC"
 fi

@@ -9,6 +9,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { PlankaClient } from "./client.js";
+import type { PlankaConfig } from "./config.js";
 
 export interface BacklogCardEvent {
   type: "backlog_card";
@@ -125,9 +126,17 @@ export interface CheckResult {
   events: UpdateEvent[];
 }
 
-export function defaultStatePath(name = "state.json"): string {
-  const dir = process.env.PLANKA_STATE_DIR || join(homedir(), ".mcp-planka");
-  return join(dir, name);
+/** State file path: <stateDir or ~/.mcp-planka>/<name>. */
+export function defaultStatePath(name = "state.json", stateDir?: string): string {
+  return join(stateDir || join(homedir(), ".mcp-planka"), name);
+}
+
+/** A tracker set up from the config (state dir, backlog pattern, start label). */
+export function trackerFromConfig(client: PlankaClient, cfg: PlankaConfig, stateFile = "state.json"): UpdateTracker {
+  return new UpdateTracker(client, defaultStatePath(stateFile, cfg.stateDir), {
+    ...(cfg.backlogPattern ? { backlogPattern: new RegExp(cfg.backlogPattern, "i") } : {}),
+    ...(cfg.startLabel ? { startLabel: cfg.startLabel } : {}),
+  });
 }
 
 export class UpdateTracker {
@@ -142,8 +151,8 @@ export class UpdateTracker {
     private readonly statePath: string = defaultStatePath(),
     opts: { backlogPattern?: RegExp; startLabel?: string; now?: () => Date } = {},
   ) {
-    this.backlogPattern = opts.backlogPattern ?? new RegExp(process.env.PLANKA_BACKLOG_PATTERN || "backlog", "i");
-    this.startLabel = (opts.startLabel ?? process.env.PLANKA_START_LABEL ?? "START").trim() || "START";
+    this.backlogPattern = opts.backlogPattern ?? /backlog/i;
+    this.startLabel = (opts.startLabel ?? "START").trim() || "START";
     this.now = opts.now ?? (() => new Date());
   }
 

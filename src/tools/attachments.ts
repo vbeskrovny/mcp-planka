@@ -36,7 +36,7 @@ export function resolveLocalPath(p: string, filesDir?: string): string {
     };
     const rel = relative(real(base), real(full));
     if (rel.startsWith("..") || isAbsolute(rel)) {
-      throw new Error(`Path ${p} is outside the allowed files directory ${base} (PLANKA_FILES_DIR)`);
+      throw new Error(`Path ${p} is outside the allowed files directory ${base} (MCP_APP_PLANKA_FILES_DIR)`);
     }
   }
   return full;

@@ -13,39 +13,38 @@ npm install
 npm run build
 ```
 
-Config is read from environment variables first, then from a `.env` file with the same `PLANKA_` keys. The file is `$PLANKA_CONFIG` if set, otherwise `.env` in the package root. The current directory is not searched: it's usually the project the assistant works on, and that project's own `.env` has nothing to do with Planka. CRLF line endings are fine, and other keys in the file are ignored.
+Every setting is named `MCP_APP_PLANKA_<name>`. It can be an environment variable, or a line in a `.env` file. The environment wins. The file is `$MCP_APP_PLANKA_CONFIG` if set, otherwise `.env` in the package root. The current directory is not searched: it's usually the project the assistant works on, and that project's own `.env` has nothing to do with Planka. CRLF line endings are fine, and other keys in the file are ignored, so one `.env` can hold the settings of several apps.
 
 ```ini
-PLANKA_URL=https://planka.example.com
-PLANKA_API_KEY=<api key>
+MCP_APP_PLANKA_URL=https://planka.example.com
+MCP_APP_PLANKA_API_KEY=<api key>
 ```
 
-**Upgrading from `.planka`:** older versions used a `.planka` file with `URL=`, `KEY=`, `MANAGERS=`, `INSTRUCTIONS=` and `FILES_DIR=`. `register.sh` and `register.ps1` migrate it for you:
-- **New file:** the keys get the `PLANKA_` prefix (`KEY` becomes `PLANKA_API_KEY`) and go into `.env`, merged into it if one exists. The file gets mode 600.
-- **Old file:** `.planka` is deleted once `.env` is verified.
-- **Conflicts:** if a key already has a different value in `.env`, nothing is changed.
-- **Custom files:** a `--config` file with the old names is converted in place.
-- **Doing it by hand:** `scripts/migrate-config.sh .planka .env`.
-- **Values:** neither script ever prints them.
+**Upgrading:** `register.sh` and `register.ps1` migrate older configs for you.
 
-Until the file is migrated, the server refuses to start and its error message names the old keys.
+Two older formats are recognized:
+- a `.planka` file with `URL=`, `KEY=`, `MANAGERS=`, `INSTRUCTIONS=` and `FILES_DIR=`
+- a `.env` with `PLANKA_<name>=` keys
 
-| Env var | Purpose |
+How the migration works:
+- **Renaming:** the keys get their `MCP_APP_PLANKA_` names (`KEY` and `PLANKA_API_KEY` become `MCP_APP_PLANKA_API_KEY`). A `.planka` is merged into `.env`, which gets mode 600. The `.planka` file is deleted once the result is verified.
+- **Plain keys:** keys like `URL=` and `KEY=` are converted only in a file named `.planka*`. In a `.env` they may belong to another app, so they're left alone (`--no-bare`).
+- **Conflicts:** if a key already has a different value, nothing is changed.
+- **Doing it by hand:** `scripts/migrate-config.sh .planka .env`, or `scripts/migrate-config.sh --no-bare .env .env`. Neither script ever prints values.
+
+Until the migration runs, the server refuses to start, and its error message names each old key with its new name.
+
+| Setting (environment or `.env`) | Purpose |
 |---|---|
-| `PLANKA_URL`, `PLANKA_API_KEY` | Planka address and API key |
-| `PLANKA_CONFIG` | Path to the config file (default: `.env` in the package root) |
-| `PLANKA_MANAGERS` | Comma-separated users (id, username, email or name). They become editors of every board `planka_create_project` / `planka_create_board` creates. Projects are always private with a single owner (the API-key user), so they don't become project managers there. No confirmation needed |
-| `PLANKA_INSTRUCTIONS` | Workflow rules the server sends to the client as MCP *instructions* when it connects. They cover tracking work on the project board matching the folder name, comments without a signature, and preview plus confirmation before deletes. Unset: the built-in rules (`src/instructions.ts`). `off`: none. A file path: that file's text |
-| `PLANKA_FILES_DIR` | If set, the attachment tools only read and write local files inside this directory. Relative paths start there. Unset: any path the server process can access, relative to its working directory |
-
-The five settings above can be set as environment variables or in the `.env` file. The environment wins. The ones below are environment variables only.
-
-| Env var | Purpose |
-|---|---|
-| `PLANKA_STATE_DIR` | Where update-tracking snapshots are stored (default `~/.mcp-planka`) |
-| `PLANKA_BACKLOG_PATTERN` | Regex (case-insensitive) that marks a list as a backlog (default `backlog`) |
-| `PLANKA_START_LABEL` | Name of the label that asks the assistant to start a card now (case-insensitive, default `START`) |
-| `PLANKA_WATCH_INTERVAL` | Poll seconds for the watcher (default 60, min 10) |
+| `MCP_APP_PLANKA_URL`, `MCP_APP_PLANKA_API_KEY` | Planka address and API key |
+| `MCP_APP_PLANKA_CONFIG` | Path to the config file (default: `.env` in the package root). Environment only |
+| `MCP_APP_PLANKA_MANAGERS` | Comma-separated users (id, username, email or name). They become editors of every board `planka_create_project` / `planka_create_board` creates. Projects are always private with a single owner (the API-key user), so they don't become project managers there. No confirmation needed |
+| `MCP_APP_PLANKA_INSTRUCTIONS` | Workflow rules the server sends to the client as MCP *instructions* when it connects. They cover tracking work on the project board matching the folder name, comments without a signature, and preview plus confirmation before deletes. Unset: the built-in rules (`src/instructions.ts`). `off`: none. A file path: that file's text |
+| `MCP_APP_PLANKA_FILES_DIR` | If set, the attachment tools only read and write local files inside this directory. Relative paths start there. Unset: any path the server process can access, relative to its working directory |
+| `MCP_APP_PLANKA_STATE_DIR` | Where update-tracking snapshots are stored (default `~/.mcp-planka`) |
+| `MCP_APP_PLANKA_BACKLOG_PATTERN` | Regex (case-insensitive) that marks a list as a backlog (default `backlog`) |
+| `MCP_APP_PLANKA_START_LABEL` | Name of the label that asks the assistant to start a card now (case-insensitive, default `START`) |
+| `MCP_APP_PLANKA_WATCH_INTERVAL` | Poll seconds for the watcher (default 60, min 10) |
 
 To create an API key in Planka v2, open your user settings and go to API key. Requests send it in the `X-Api-Key` header.
 
@@ -99,7 +98,7 @@ Every MCP client starts the server the same way: it runs a command and talks to 
     "planka": {
       "command": "node",
       "args": ["/abs/path/mcp-planka/dist/index.js"],
-      "env": { "PLANKA_CONFIG": "/abs/path/mcp-planka/.env" }
+      "env": { "MCP_APP_PLANKA_CONFIG": "/abs/path/mcp-planka/.env" }
     }
   }
 }
@@ -128,7 +127,7 @@ Where each client keeps that config:
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` | `mcpServers` format as above |
 | Cline / Roo Code | MCP Servers panel → Configure (`cline_mcp_settings.json`) | `mcpServers` format as above |
 | VS Code (Copilot agent mode) | `.vscode/mcp.json` or user settings | top-level key is `servers` instead of `mcpServers`; add `"type": "stdio"` |
-| OpenAI Codex CLI | `~/.codex/config.toml` | `[mcp_servers.planka]` with `command = "node"`, `args = [...]`, `env = { PLANKA_CONFIG = "..." }` |
+| OpenAI Codex CLI | `~/.codex/config.toml` | `[mcp_servers.planka]` with `command = "node"`, `args = [...]`, `env = { MCP_APP_PLANKA_CONFIG = "..." }` |
 | Gemini CLI | `~/.gemini/settings.json` | `mcpServers` format as above |
 | Any other client | its MCP settings | command, args and env as above |
 
@@ -136,7 +135,7 @@ Check that it works by asking the assistant to "call planka_whoami". To test the
 
 **What doesn't carry over from Claude Code:**
 - **Registration:** `register.sh` / `register.ps1` only register with Claude Code. Other clients need the config entry above.
-- **Workflow rules:** they ship with the server as MCP instructions (see `PLANKA_INSTRUCTIONS` above), so every client that supports server instructions gets them. For a client that ignores them, copy `src/instructions.ts`'s text into that client's rules file: `AGENTS.md` (Codex), `.cursor/rules`, `GEMINI.md`, `.github/copilot-instructions.md`, and so on.
+- **Workflow rules:** they ship with the server as MCP instructions (see `MCP_APP_PLANKA_INSTRUCTIONS` above), so every client that supports server instructions gets them. For a client that ignores them, copy `src/instructions.ts`'s text into that client's rules file: `AGENTS.md` (Codex), `.cursor/rules`, `GEMINI.md`, `.github/copilot-instructions.md`, and so on.
 - **Approval prompts:** whether the client asks you before running a tool is up to the client. The server's own safeguards work in every client:
   - Projects are always private.
   - Deletes need a preview and then the exact name.
@@ -217,7 +216,7 @@ A `projectId` or `boardId` outside your own private projects is refused. An acco
 | `planka_delete_attachment` | Delete the attachment and its file. Destructive, so it's worth adding to the client's "ask before" list (see below) |
 | `planka_download_attachment` | With `savePath`: saves the file. A directory keeps the attachment's name, and existing files are only replaced with `overwrite: true`. Without `savePath`: text files up to 256 KB come back as text, and images up to 2 MB as an image the assistant can look at. Larger or binary files need `savePath` |
 
-- **Where files can be:** the server reads and writes local files with its own process rights. Set `PLANKA_FILES_DIR` to limit it to one folder; then paths outside it are refused, even through symlinks.
+- **Where files can be:** the server reads and writes local files with its own process rights. Set `MCP_APP_PLANKA_FILES_DIR` to limit it to one folder; then paths outside it are refused, even through symlinks.
 - **Downloads keep the API key at home:** the key is only sent to your Planka host. A URL pointing anywhere else is refused.
 - **Docker / Podman mode:** the container can't see your files unless a folder is mounted. See [Attachments in Docker / Podman mode](#attachments-in-docker--podman-mode).
 - **Claude Code permission:** add `"mcp__planka__planka_delete_attachment"` to `permissions.ask` in `~/.claude/settings.json` to be asked before each delete, like the other delete tools.
@@ -233,9 +232,9 @@ The server runs in a throwaway container (`docker run --rm`), so it only sees th
 | Uploads from `filePath` | no: host files aren't visible in the container |
 | Downloads with `savePath` | no: the file is written inside the container and lost when it exits |
 
-**Setup:** none needed. `./register.sh` uses `<repo>/attachments` and creates it with mode 700 if it's missing. To use another folder, pass `--files-dir DIR` or set `PLANKA_FILES_DIR=` in `.env`. `--files-dir none` registers no folder.
+**Setup:** none needed. `./register.sh` uses `<repo>/attachments` and creates it with mode 700 if it's missing. To use another folder, pass `--files-dir DIR` or set `MCP_APP_PLANKA_FILES_DIR=` in `.env`. `--files-dir none` registers no folder.
 
-`register.sh` turns the path into an absolute one and adds `-v <repo>/attachments:/files:rw -e PLANKA_FILES_DIR=/files` to the `docker run` command (Podman: `rw,z` for SELinux).
+`register.sh` turns the path into an absolute one and adds `-v <repo>/attachments:/files:rw -e MCP_APP_PLANKA_FILES_DIR=/files` to the `docker run` command (Podman: `rw,z` for SELinux).
 
 **Paths:**
 - **Relative paths start in the folder:** inside the container the folder is `/files`. `filePath: "report.pdf"` reads `<repo>/attachments/report.pdf`, and `savePath: "./"` saves into `attachments/`.
@@ -245,8 +244,8 @@ The server runs in a throwaway container (`docker run --rm`), so it only sees th
 **Good to know:**
 - **Ownership:** files the server saves belong to root, because the container runs as root. With rootless Podman they belong to your user.
 - **Kept out of git:** `attachments/` is in `.gitignore`, so downloads are never committed, for example by a script that runs `git add -A`, and never mirrored.
-- **Re-running is enough:** after a `git pull`, `./register.sh` picks the same folder again: `--files-dir`, else `PLANKA_FILES_DIR` from the environment, else from `.env`, else `<repo>/attachments`.
-- **Node mode:** the server uses your own filesystem, so no mount is needed. The folder only sets `PLANKA_FILES_DIR` to limit file access to it.
+- **Re-running is enough:** after a `git pull`, `./register.sh` picks the same folder again: `--files-dir`, else `MCP_APP_PLANKA_FILES_DIR` from the environment, else from `.env`, else `<repo>/attachments`.
+- **Node mode:** the server uses your own filesystem, so no mount is needed. The folder only sets `MCP_APP_PLANKA_FILES_DIR` to limit file access to it.
 - **Config permissions:** if `.env` is readable by others and belongs to you, `register.sh` changes it to mode 600, since it holds the API key.
 
 ## Notifications & two-way comments
@@ -255,10 +254,10 @@ The server runs in a throwaway container (`docker run --rm`), so it only sees th
 
 The tracker saves a snapshot of every board (each card's list, comment count and ticked tasks) and reports what changed since then:
 
-- `backlog_card`: a card was created in a list matching `PLANKA_BACKLOG_PATTERN`, or moved into one (then with `fromList` and `by`). Cards the API-key user created are ignored.
+- `backlog_card`: a card was created in a list matching `MCP_APP_PLANKA_BACKLOG_PATTERN`, or moved into one (then with `fromList` and `by`). Cards the API-key user created are ignored.
 - `card_moved`: a card was moved to any other list, with `fromList`, `list` and `by`.
 - `task`: a task (checkbox) was ticked (`completed: true`) or unticked (`completed: false`), with `by`. Tasks created already ticked don't count.
-- `start_request`: a card carries the `START` label (`PLANKA_START_LABEL`), with its `labelId`. This is reported once when the label appears, and also on a board's first check, because it's pending work, not old activity.
+- `start_request`: a card carries the `START` label (`MCP_APP_PLANKA_START_LABEL`), with its `labelId`. This is reported once when the label appears, and also on a board's first check, because it's pending work, not old activity.
 - `comment`: a new comment by **anyone except the API-key user**. The assistant's own replies therefore never trigger events.
 
 Who moved a card or ticked a task comes from the card's action log (`GET /cards/:id/actions`), so the assistant's own moves and ticks are skipped too. If the log can't be read, the change is still reported, without `by`. After an upgrade, task changes are reported from the second check of a board on, because the first check records the current ticks.
@@ -277,7 +276,7 @@ You can receive events in three ways:
    In Claude Code, run the watcher under the **Monitor** tool. Each event then arrives in the session and Claude can answer it on the card. With other clients, pipe the JSON lines into your own notifier. The watcher keeps its own state (`watch-state.json`), so it never consumes the MCP tool's events.
 3. **Scheduled**: in Claude Code, `/loop 10m check planka updates and reply to new comments`. Other clients can use their own scheduler or cron.
 
-Automatic checks don't start by themselves. The built-in instructions tell the assistant to end its session-start summary with a one-line reminder: `/loop 1m …` in Claude Code, or the watcher for 30-second checks. It skips the reminder once a loop or watcher is running. Set `PLANKA_INSTRUCTIONS=off` or use your own instructions file to drop it.
+Automatic checks don't start by themselves. The built-in instructions tell the assistant to end its session-start summary with a one-line reminder: `/loop 1m …` in Claude Code, or the watcher for 30-second checks. It skips the reminder once a loop or watcher is running. Set `MCP_APP_PLANKA_INSTRUCTIONS=off` or use your own instructions file to drop it.
 
 > **Can't comment on a board?** Planka only lets *board members* comment. Project managers can administer a board without being a member of it. A board created through the API key also starts with the key's user as its only member. Fix it with `planka_sync_board_members` (preview first with `dryRun: true`, then apply with `dryRun: false`), or add members in the board header.
 
@@ -300,6 +299,6 @@ Planka's own webhooks need a public HTTPS endpoint. Polling works from a laptop 
 
 ```bash
 npm test                    # unit tests (offline, fake Planka backend + in-memory MCP client)
-PLANKA_TEST_BOARD_ID=<id> npm run test:int   # live lifecycle test; creates and deletes temp lists
+MCP_APP_PLANKA_TEST_BOARD_ID=<id> npm run test:int   # live lifecycle test; creates and deletes temp lists
 npm run typecheck
 ```

@@ -6,9 +6,10 @@
 #   --mode     how to run the server; auto (default) tests what works here, recommends one and asks
 #   --yes      take the recommended mode without asking (also used when there is no terminal)
 #   --config   use a specific config file (e.g. another user's API key); default: .env in the repo.
-#              An old .planka (URL= / KEY= ...) is migrated to .env with PLANKA_ keys and then deleted.
-#   --files-dir  folder the attachment tools may read/write (PLANKA_FILES_DIR); mounted as /files in containers.
-#              Default: PLANKA_FILES_DIR from the environment, else from the config file, else <repo>/attachments
+#              Old configs (.planka with URL= / KEY= ..., or PLANKA_<name>= keys) are migrated to .env with
+#              MCP_APP_PLANKA_<name> keys; a migrated .planka is deleted.
+#   --files-dir  folder the attachment tools may read/write (MCP_APP_PLANKA_FILES_DIR); mounted as /files in containers.
+#              Default: MCP_APP_PLANKA_FILES_DIR from the environment, else from the config file, else <repo>/attachments
 #              (created, mode 700).
 #              "none" = no folder (Node: any path the server can access; containers: no host files)
 #   --dry-run  print what would be done, change nothing
@@ -32,7 +33,7 @@ while [[ $# -gt 0 ]]; do
     --config)  CONFIG="$2"; shift 2 ;;
     --files-dir) FILES_DIR="$2"; shift 2 ;;
     --dry-run) DRY=1; shift ;;
-    -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -46,11 +47,18 @@ case "$MODE" in auto|node|docker|podman) ;; *) die "--mode must be auto, node, d
 command -v claude >/dev/null || die "claude CLI not found (install Claude Code first: https://docs.claude.com/claude-code)"
 
 # --- Config file -------------------------------------------------------------
-# Old format: .planka with URL= / KEY= / MANAGERS= / INSTRUCTIONS= / FILES_DIR=. New: .env with PLANKA_ keys.
+# Old formats: .planka with URL= / KEY= / MANAGERS= / INSTRUCTIONS= / FILES_DIR=, and PLANKA_<name>= keys.
+# Current: .env with MCP_APP_PLANKA_<name>= keys.
 MIGRATE="$ROOT/scripts/migrate-config.sh"
-has_legacy_keys() { grep -qE '^[[:space:]]*(URL|KEY|MANAGERS|INSTRUCTIONS|FILES_DIR)[[:space:]]*=' "$1"; }
+# Bare keys (URL= / KEY= ...) are only ours in a .planka* file; in a shared .env they may belong to another app.
+is_planka_file() { [[ "$(basename "$1")" == .planka* ]]; }
+has_legacy_keys() {
+  if is_planka_file "$1"; then grep -qE '^[[:space:]]*(PLANKA_[A-Z_]+|URL|KEY|MANAGERS|INSTRUCTIONS|FILES_DIR)[[:space:]]*=' "$1"
+  else grep -qE '^[[:space:]]*PLANKA_[A-Z_]+[[:space:]]*=' "$1"; fi
+}
 migrate() { # $1 = from, $2 = to
-  if [[ $DRY -eq 1 ]]; then echo "[dry-run] migrate $1 -> $2 (PLANKA_ keys)" >&2; else bash "$MIGRATE" "$1" "$2"; fi
+  local opts=(); is_planka_file "$1" || opts=(--no-bare)
+  if [[ $DRY -eq 1 ]]; then echo "[dry-run] migrate $1 -> $2 (MCP_APP_PLANKA_ keys)" >&2; else bash "$MIGRATE" "${opts[@]}" "$1" "$2"; fi
 }
 if [[ -n "$CONFIG" ]]; then
   CONFIG="$(cd "$(dirname "$CONFIG")" && pwd -P)/$(basename "$CONFIG")"
@@ -61,8 +69,8 @@ else
   if [[ -f "$ROOT/.env" ]] && has_legacy_keys "$ROOT/.env"; then migrate "$ROOT/.env" "$ROOT/.env"; fi
   if [[ -f "$ROOT/.env" || ( $DRY -eq 1 && -f "$ROOT/.planka" ) ]]; then
     CONFIG="$ROOT/.env"
-  elif [[ -z "${PLANKA_URL:-}" || -z "${PLANKA_API_KEY:-}" ]]; then
-    die "no $ROOT/.env (PLANKA_URL=... / PLANKA_API_KEY=... / PLANKA_MANAGERS=...) and PLANKA_URL/PLANKA_API_KEY not set"
+  elif [[ -z "${MCP_APP_PLANKA_URL:-}" || -z "${MCP_APP_PLANKA_API_KEY:-}" ]]; then
+    die "no $ROOT/.env (MCP_APP_PLANKA_URL=... / MCP_APP_PLANKA_API_KEY=... / MCP_APP_PLANKA_MANAGERS=...) and MCP_APP_PLANKA_URL/MCP_APP_PLANKA_API_KEY not set"
   fi
 fi
 # The config holds the API key: make it private to its owner (only if it is ours to change).
@@ -77,12 +85,12 @@ if [[ -n "$CONFIG" ]]; then
   fi
 fi
 
-# Folder for attachment uploads/downloads: --files-dir, else PLANKA_FILES_DIR from the environment, else from
+# Folder for attachment uploads/downloads: --files-dir, else MCP_APP_PLANKA_FILES_DIR from the environment, else from
 # the config file, else <repo>/attachments.
 config_value() { if [[ -f "$CONFIG" ]]; then sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$CONFIG" | tr -d '\r' | tail -1; fi; }
 if [[ -z "$FILES_DIR" ]]; then
-  FILES_DIR="${PLANKA_FILES_DIR:-}"
-  [[ -n "$FILES_DIR" ]] || FILES_DIR="$(config_value PLANKA_FILES_DIR)"
+  FILES_DIR="${MCP_APP_PLANKA_FILES_DIR:-}"
+  [[ -n "$FILES_DIR" ]] || FILES_DIR="$(config_value MCP_APP_PLANKA_FILES_DIR)"
   [[ -n "$FILES_DIR" ]] || FILES_DIR="$ROOT/attachments"
 fi
 if [[ "${FILES_DIR,,}" == "none" ]]; then
@@ -185,10 +193,10 @@ if [[ "$MODE" == "node" ]]; then
   if [[ ! -f "$ENTRY" ]] || [[ -n "$(find src -newer "$ENTRY" -name '*.ts' -print -quit)" ]]; then
     echo "Building (dist/ missing or older than src/)..."; run npm run build --silent
   fi
-  CHECK=(env ${CONFIG:+PLANKA_CONFIG="$CONFIG"} node "$ROOT/dist/check.js")
+  CHECK=(env ${CONFIG:+MCP_APP_PLANKA_CONFIG="$CONFIG"} node "$ROOT/dist/check.js")
   SERVER=(node "$ENTRY")
-  ENV_ARGS=(); [[ -n "$CONFIG" ]] && ENV_ARGS=(-e "PLANKA_CONFIG=$CONFIG")
-  [[ -n "$FILES_DIR" ]] && ENV_ARGS+=(-e "PLANKA_FILES_DIR=$FILES_DIR")
+  ENV_ARGS=(); [[ -n "$CONFIG" ]] && ENV_ARGS=(-e "MCP_APP_PLANKA_CONFIG=$CONFIG")
+  [[ -n "$FILES_DIR" ]] && ENV_ARGS+=(-e "MCP_APP_PLANKA_FILES_DIR=$FILES_DIR")
 else
   RT="$MODE"
   echo "Building image $IMAGE with $RT..."
@@ -198,7 +206,7 @@ else
   RUN_ARGS=(run -i --rm --pull=never -v "$CONFIG:/app/.env:$VOL_OPTS" -v mcp-planka-state:/data)
   if [[ -n "$FILES_DIR" ]]; then
     FILES_OPTS="rw"; [[ "$RT" == "podman" ]] && FILES_OPTS="rw,z"
-    RUN_ARGS+=(-v "$FILES_DIR:/files:$FILES_OPTS" -e PLANKA_FILES_DIR=/files)
+    RUN_ARGS+=(-v "$FILES_DIR:/files:$FILES_OPTS" -e MCP_APP_PLANKA_FILES_DIR=/files)
   fi
   CHECK=("$RT" "${RUN_ARGS[@]}" --entrypoint node "$IMAGE" dist/check.js)
   SERVER=("$RT" "${RUN_ARGS[@]}" "$IMAGE")

@@ -1,6 +1,6 @@
 /**
  * Live attachment test against a real Planka server. Opt-in:
- *   PLANKA_INTEGRATION=1 PLANKA_TEST_BOARD_ID=<board id> npm run test:int
+ *   MCP_APP_PLANKA_INTEGRATION=1 MCP_APP_PLANKA_TEST_BOARD_ID=<board id> npm run test:int
  * Works on a card in a temporary list it creates, and deletes card and list afterwards.
  */
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -11,8 +11,8 @@ import { PlankaClient } from "../../src/client.js";
 import { loadConfig } from "../../src/config.js";
 import { connect } from "../helpers.js";
 
-const enabled = process.env.PLANKA_INTEGRATION === "1" && !!process.env.PLANKA_TEST_BOARD_ID;
-const BOARD = process.env.PLANKA_TEST_BOARD_ID!;
+const enabled = process.env.MCP_APP_PLANKA_INTEGRATION === "1" && !!process.env.MCP_APP_PLANKA_TEST_BOARD_ID;
+const BOARD = process.env.MCP_APP_PLANKA_TEST_BOARD_ID!;
 // 1x1 PNG
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
 

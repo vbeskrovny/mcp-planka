@@ -17,7 +17,7 @@
     "watch": "node dist/watch.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run test/unit",
-    "test:int": "PLANKA_INTEGRATION=1 vitest run test/integration --testTimeout 30000"
+    "test:int": "MCP_APP_PLANKA_INTEGRATION=1 vitest run test/integration --testTimeout 30000"
   },
   "engines": {
     "node": ">=20"

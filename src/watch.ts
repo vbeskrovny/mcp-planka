@@ -6,10 +6,11 @@
  */
 import { PlankaClient } from "./client.js";
 import { loadConfig } from "./config.js";
-import { defaultStatePath, UpdateTracker } from "./updates.js";
+import { trackerFromConfig } from "./updates.js";
 
-function parseArgs(argv: string[]) {
-  const out = { interval: Number(process.env.PLANKA_WATCH_INTERVAL ?? 60), project: undefined as string | undefined, boards: [] as string[], once: false };
+/** Parse watcher arguments; `defaultInterval` comes from MCP_APP_PLANKA_WATCH_INTERVAL (else 60 s). */
+function parseArgs(argv: string[], defaultInterval = 60) {
+  const out = { interval: defaultInterval, project: undefined as string | undefined, boards: [] as string[], once: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--interval") out.interval = Number(argv[++i]);
@@ -23,10 +24,10 @@ function parseArgs(argv: string[]) {
 }
 
 async function main() {
-  const args = parseArgs(process.argv.slice(2));
   const cfg = loadConfig();
+  const args = parseArgs(process.argv.slice(2), cfg.watchInterval);
   // Separate state from the MCP tool so the watcher and Claude don't consume each other's events.
-  const tracker = new UpdateTracker(new PlankaClient(cfg.url, cfg.apiKey), defaultStatePath("watch-state.json"));
+  const tracker = trackerFromConfig(new PlankaClient(cfg.url, cfg.apiKey), cfg, "watch-state.json");
   const tick = async () => {
     try {
       const r = await tracker.check({ projectId: args.project, boardIds: args.boards });

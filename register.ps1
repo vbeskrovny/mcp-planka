@@ -5,8 +5,9 @@
   Uses Windows Node (>= 20) if available, otherwise runs the server with Node inside WSL.
   WSL's Node is located by absolute path (nvm, fnm, volta etc. only set PATH in interactive
   shells), and registered as "wsl.exe -e <node> <entry>", so no shell setup is needed at runtime.
-  Config: .env in the repo (PLANKA_URL=..., PLANKA_API_KEY=...), or -Config <file>. An old .planka
-  (URL= / KEY= ...) is migrated to .env with PLANKA_ keys and then deleted.
+  Config: .env in the repo (MCP_APP_PLANKA_URL=..., MCP_APP_PLANKA_API_KEY=...), or -Config <file>. An old .planka
+  (URL= / KEY= ...) or PLANKA_<name>= keys are migrated to MCP_APP_PLANKA_<name> keys in .env; a migrated
+  .planka is deleted.
   If you use Claude Code inside WSL, run ./register.sh there instead.
 .EXAMPLE
   .\register.ps1
@@ -53,14 +54,18 @@ $Root  = (Resolve-Path $PSScriptRoot).Path
 $Entry = Join-Path $Root "dist\index.js"
 if (-not (Get-Command claude -ErrorAction SilentlyContinue)) { throw "claude CLI not found in PATH" }
 
-# Old format: .planka with URL= / KEY= / ... New: .env with PLANKA_ keys.
+# Old formats: .planka with URL= / KEY= / ..., and PLANKA_<name>= keys. Current: .env with MCP_APP_PLANKA_<name>= keys.
 $Migrate = Join-Path $Root "scripts\migrate-config.ps1"
+# Bare keys (URL= / KEY= ...) are only ours in a .planka* file; in a shared .env they may belong to another app.
+function IsPlankaFile([string]$Path) { return (Split-Path -Leaf $Path) -like ".planka*" }
 function HasLegacyKeys([string]$Path) {
-  return [bool](Select-String -LiteralPath $Path -Pattern '^\s*(URL|KEY|MANAGERS|INSTRUCTIONS|FILES_DIR)\s*=' -Quiet)
+  $pattern = if (IsPlankaFile $Path) { '^\s*(PLANKA_[A-Z_]+|URL|KEY|MANAGERS|INSTRUCTIONS|FILES_DIR)\s*=' } else { '^\s*PLANKA_[A-Z_]+\s*=' }
+  return [bool](Select-String -LiteralPath $Path -Pattern $pattern -CaseSensitive -Quiet)
 }
 function MigrateConfig([string]$From, [string]$To) {
-  if ($DryRun) { Write-Host "[dry-run] migrate $From -> $To (PLANKA_ keys)"; return }
-  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Migrate -Src $From -Dest $To
+  if ($DryRun) { Write-Host "[dry-run] migrate $From -> $To (MCP_APP_PLANKA_ keys)"; return }
+  $extra = @(); if (-not (IsPlankaFile $From)) { $extra = @("-NoBare") }
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Migrate -Src $From -Dest $To @extra
   if ($LASTEXITCODE -ne 0) { throw "config migration failed ($LASTEXITCODE)" }
 }
 $EnvFile = Join-Path $Root ".env"
@@ -71,8 +76,8 @@ if ($Config) {
   $Legacy = Join-Path $Root ".planka"
   if (Test-Path $Legacy) { MigrateConfig $Legacy $EnvFile }
   if ((Test-Path $EnvFile) -and (HasLegacyKeys $EnvFile)) { MigrateConfig $EnvFile $EnvFile }
-  if (-not (Test-Path $EnvFile) -and -not ($DryRun -and (Test-Path $Legacy)) -and -not ($env:PLANKA_URL -and $env:PLANKA_API_KEY)) {
-    throw "No $EnvFile (PLANKA_URL=... / PLANKA_API_KEY=...) and PLANKA_URL/PLANKA_API_KEY not set"
+  if (-not (Test-Path $EnvFile) -and -not ($DryRun -and (Test-Path $Legacy)) -and -not ($env:MCP_APP_PLANKA_URL -and $env:MCP_APP_PLANKA_API_KEY)) {
+    throw "No $EnvFile (MCP_APP_PLANKA_URL=... / MCP_APP_PLANKA_API_KEY=...) and MCP_APP_PLANKA_URL/MCP_APP_PLANKA_API_KEY not set"
   }
 }
 
@@ -116,7 +121,7 @@ if ($UseWsl) {
   $Server = @("wsl.exe") + $WslSel + @("-e")
   if ($Config) {
     $WslConfig = (WslOut "-c" "wslpath -a '$($Config -replace '\\', '/')'") | Select-Object -Last 1
-    $Server += @("env", "PLANKA_CONFIG=$WslConfig")
+    $Server += @("env", "MCP_APP_PLANKA_CONFIG=$WslConfig")
   }
   $Server += @($WslNode, $WslEntry)
 } else {
@@ -135,7 +140,7 @@ foreach ($s in "local", "user", "project") {
 }
 
 $ArgList = @("mcp", "add", "-s", $Scope, $Name)
-if ($Config -and -not $UseWsl) { $ArgList += @("-e", "PLANKA_CONFIG=$Config") }
+if ($Config -and -not $UseWsl) { $ArgList += @("-e", "MCP_APP_PLANKA_CONFIG=$Config") }
 $ArgList += "--"
 $ArgList += $Server
 Write-Host "Registering '$Name' ($Scope scope)"

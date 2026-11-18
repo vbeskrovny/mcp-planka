@@ -4,7 +4,7 @@ import { ConfigError } from "./config.js";
 /**
  * Workflow rules sent to the MCP client as server `instructions` at connect time, so any client
  * (Claude Code, Cursor, Codex, ...) tracks work on Planka the same way.
- * Override with PLANKA_INSTRUCTIONS=<file> (in .env or the environment), or turn off with "off".
+ * Override with MCP_APP_PLANKA_INSTRUCTIONS=<file> (in .env or the environment), or turn off with "off".
  */
 export const DEFAULT_INSTRUCTIONS = `Planka progress tracking. Follow these rules whenever this server is connected.
 

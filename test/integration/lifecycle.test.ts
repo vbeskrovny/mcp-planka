@@ -1,6 +1,6 @@
 /**
  * Live integration test against a real Planka server. Opt-in:
- *   PLANKA_INTEGRATION=1 PLANKA_TEST_BOARD_ID=<board id> npm run test:int
+ *   MCP_APP_PLANKA_INTEGRATION=1 MCP_APP_PLANKA_TEST_BOARD_ID=<board id> npm run test:int
  * Works only inside a temporary list it creates, and deletes that list afterwards.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -8,8 +8,8 @@ import { PlankaClient } from "../../src/client.js";
 import { loadConfig } from "../../src/config.js";
 import { connect } from "../helpers.js";
 
-const enabled = process.env.PLANKA_INTEGRATION === "1" && !!process.env.PLANKA_TEST_BOARD_ID;
-const BOARD = process.env.PLANKA_TEST_BOARD_ID!;
+const enabled = process.env.MCP_APP_PLANKA_INTEGRATION === "1" && !!process.env.MCP_APP_PLANKA_TEST_BOARD_ID;
+const BOARD = process.env.MCP_APP_PLANKA_TEST_BOARD_ID!;
 
 describe.runIf(enabled)("live lifecycle", () => {
   let api: PlankaClient;

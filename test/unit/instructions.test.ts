@@ -88,16 +88,16 @@ describe("server instructions", () => {
 });
 
 describe("loadConfig instructions setting", () => {
-  it("reads PLANKA_INSTRUCTIONS from the file; the environment wins", () => {
+  it("reads MCP_APP_PLANKA_INSTRUCTIONS from the file; the environment wins", () => {
     const f = join(tmp, "a.env");
-    writeFileSync(f, "PLANKA_URL=https://x\r\nPLANKA_API_KEY=k\r\nPLANKA_INSTRUCTIONS=off\r\n");
+    writeFileSync(f, "MCP_APP_PLANKA_URL=https://x\r\nMCP_APP_PLANKA_API_KEY=k\r\nMCP_APP_PLANKA_INSTRUCTIONS=off\r\n");
     expect(loadConfig({ env: {}, files: [f] }).instructions).toBe("off");
-    expect(loadConfig({ env: { PLANKA_INSTRUCTIONS: "/r.md" }, files: [f] }).instructions).toBe("/r.md");
+    expect(loadConfig({ env: { MCP_APP_PLANKA_INSTRUCTIONS: "/r.md" }, files: [f] }).instructions).toBe("/r.md");
   });
 
   it("leaves it undefined when not set", () => {
     const f = join(tmp, "b.env");
-    writeFileSync(f, "PLANKA_URL=https://x\nPLANKA_API_KEY=k\n");
+    writeFileSync(f, "MCP_APP_PLANKA_URL=https://x\nMCP_APP_PLANKA_API_KEY=k\n");
     expect(loadConfig({ env: {}, files: [f] }).instructions).toBeUndefined();
   });
 });

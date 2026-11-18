@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export interface PlankaConfig {
@@ -11,6 +11,14 @@ export interface PlankaConfig {
   instructions?: string;
   /** If set, attachment tools only read/write local files inside this directory. */
   filesDir?: string;
+  /** Where update-tracking snapshots are kept (default ~/.mcp-planka). */
+  stateDir?: string;
+  /** Regex (case-insensitive) marking backlog lists (default "backlog"). */
+  backlogPattern?: string;
+  /** Label that asks to start a card now (default "START"). */
+  startLabel?: string;
+  /** Default poll interval of the watcher, in seconds. */
+  watchInterval?: number;
 }
 
 export class ConfigError extends Error {
@@ -35,15 +43,25 @@ export function parseKeyValue(text: string): Record<string, string> {
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-/** Settings the server reads, all with the PLANKA_ prefix (same names in the environment and in .env). */
-export const CONFIG_KEYS = ["PLANKA_URL", "PLANKA_API_KEY", "PLANKA_MANAGERS", "PLANKA_INSTRUCTIONS", "PLANKA_FILES_DIR"] as const;
-/** Keys of the old .planka format, and their new names. */
+/** Prefix of every mcp-planka setting, in the environment and in .env. */
+export const PREFIX = "MCP_APP_PLANKA_";
+/** Setting names (without the prefix). */
+export const SETTINGS = [
+  "URL", "API_KEY", "MANAGERS", "INSTRUCTIONS", "FILES_DIR", "STATE_DIR", "BACKLOG_PATTERN", "START_LABEL", "WATCH_INTERVAL",
+] as const;
+export type Setting = (typeof SETTINGS)[number];
+/** Environment variable with the config file path (it can't be set inside that file). */
+export const CONFIG_PATH_VAR = `${PREFIX}CONFIG`;
+
+/** Old names and their new ones: PLANKA_<name> (.env, 2026-11) and the bare .planka keys before that. */
 export const LEGACY_KEYS: Record<string, string> = {
-  URL: "PLANKA_URL",
-  KEY: "PLANKA_API_KEY",
-  MANAGERS: "PLANKA_MANAGERS",
-  INSTRUCTIONS: "PLANKA_INSTRUCTIONS",
-  FILES_DIR: "PLANKA_FILES_DIR",
+  URL: `${PREFIX}URL`,
+  KEY: `${PREFIX}API_KEY`,
+  MANAGERS: `${PREFIX}MANAGERS`,
+  INSTRUCTIONS: `${PREFIX}INSTRUCTIONS`,
+  FILES_DIR: `${PREFIX}FILES_DIR`,
+  PLANKA_CONFIG: CONFIG_PATH_VAR,
+  ...Object.fromEntries(SETTINGS.map((k) => [`PLANKA_${k}`, `${PREFIX}${k}`])),
 };
 
 export interface LoadConfigOptions {
@@ -53,13 +71,13 @@ export interface LoadConfigOptions {
 }
 
 /**
- * Resolve config: PLANKA_* env vars win, otherwise the same keys from a `.env` file:
- * $PLANKA_CONFIG, else `.env` in the package root. The current directory is NOT searched:
+ * Resolve config: MCP_APP_PLANKA_* environment variables win, otherwise the same keys from a `.env` file:
+ * $MCP_APP_PLANKA_CONFIG, else `.env` in the package root. The current directory is NOT searched:
  * it is usually the project the client works on, whose own .env has nothing to do with Planka.
  */
 export function loadConfig(opts: LoadConfigOptions = {}): PlankaConfig {
   const env = opts.env ?? process.env;
-  const files = opts.files ?? (env.PLANKA_CONFIG ? [env.PLANKA_CONFIG] : [resolve(packageRoot, ".env")]);
+  const files = opts.files ?? (env[CONFIG_PATH_VAR] ? [env[CONFIG_PATH_VAR]!] : [resolve(packageRoot, ".env")]);
 
   let fileValues: Record<string, string> = {};
   let source: string | undefined;
@@ -70,36 +88,52 @@ export function loadConfig(opts: LoadConfigOptions = {}): PlankaConfig {
       break;
     }
   }
-  const get = (k: (typeof CONFIG_KEYS)[number]) => env[k] || fileValues[k] || undefined;
+  /** A setting: environment first, then the file; empty counts as unset. */
+  const get = (k: Setting) => env[PREFIX + k] || fileValues[PREFIX + k] || undefined;
 
-  const url = get("PLANKA_URL");
-  const apiKey = get("PLANKA_API_KEY");
-  const missing = [!url && "PLANKA_URL", !apiKey && "PLANKA_API_KEY"].filter(Boolean);
+  const url = get("URL");
+  const apiKey = get("API_KEY");
+  const missing = [!url && `${PREFIX}URL`, !apiKey && `${PREFIX}API_KEY`].filter(Boolean);
   if (missing.length) {
-    const legacy = Object.keys(LEGACY_KEYS).filter((k) => k in fileValues);
+    // Bare keys (URL, KEY, ...) only count as ours in a .planka* file; a shared .env may use them for another app.
+    const bareOk = !!source && basename(source).startsWith(".planka");
+    const inFile = Object.keys(LEGACY_KEYS).filter((k) => k in fileValues && (k.startsWith("PLANKA_") || bareOk));
+    const inEnv = Object.keys(LEGACY_KEYS).filter((k) => k.startsWith("PLANKA_") && env[k] !== undefined);
     const legacyFile = files.map((f) => resolve(dirname(f), ".planka")).find((f) => existsSync(f));
-    const hint = legacy.length
-      ? ` ${source} uses old key names (${legacy.join(", ")}); rename them to ${legacy.map((k) => LEGACY_KEYS[k]).join(", ")} or run ./register.sh, which migrates them.`
-      : legacyFile
-        ? ` Found the old config ${legacyFile}: run ./register.sh to migrate it to .env.`
-        : "";
+    const rename = (keys: string[]) => keys.map((k) => `${k} -> ${LEGACY_KEYS[k]}`).join(", ");
+    const hints = [
+      inFile.length && `${source} uses old key names (${rename(inFile)}); run ./register.sh, which migrates them, or rename them by hand.`,
+      inEnv.length && `Old environment variable names are set (${rename(inEnv)}); rename them.`,
+      !inFile.length && legacyFile && `Found the old config ${legacyFile}: run ./register.sh to migrate it to .env.`,
+    ].filter(Boolean);
     throw new ConfigError(
       `Missing Planka config: ${missing.join(", ")}. Set them as environment variables or in a .env file ` +
-        `(PLANKA_URL=..., PLANKA_API_KEY=...).${hint}`,
+        `(${PREFIX}URL=..., ${PREFIX}API_KEY=...).${hints.length ? ` ${hints.join(" ")}` : ""}`,
     );
   }
-  const managers = (get("PLANKA_MANAGERS") ?? "")
+  const managers = (get("MANAGERS") ?? "")
     .split(",")
     .map((m) => m.trim())
     .filter(Boolean);
   // INSTRUCTIONS may be set to an empty value on purpose (= default), so don't treat "" as unset.
-  const instructions = env.PLANKA_INSTRUCTIONS ?? fileValues.PLANKA_INSTRUCTIONS;
-  const filesDir = get("PLANKA_FILES_DIR");
+  const instructions = env[`${PREFIX}INSTRUCTIONS`] ?? fileValues[`${PREFIX}INSTRUCTIONS`];
+  const interval = get("WATCH_INTERVAL");
+  const watchInterval = interval === undefined ? undefined : Number(interval);
+  if (watchInterval !== undefined && !(watchInterval >= 10)) {
+    throw new ConfigError(`${PREFIX}WATCH_INTERVAL must be a number of seconds >= 10`);
+  }
+  const optional = {
+    filesDir: get("FILES_DIR"),
+    stateDir: get("STATE_DIR"),
+    backlogPattern: get("BACKLOG_PATTERN"),
+    startLabel: get("START_LABEL"),
+    watchInterval,
+  };
   return {
     url: url!.replace(/\/+$/, ""),
     apiKey: apiKey!,
     managers,
     ...(instructions !== undefined ? { instructions } : {}),
-    ...(filesDir ? { filesDir } : {}),
+    ...Object.fromEntries(Object.entries(optional).filter(([, v]) => v !== undefined)),
   };
 }

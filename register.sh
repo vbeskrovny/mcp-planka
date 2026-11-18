@@ -223,6 +223,12 @@ echo "Registering '$NAME' ($SCOPE scope, $MODE)..."
 # Name before -e: newer Claude Code versions read -e as a list and would take the name as a variable.
 run claude mcp add -s "$SCOPE" "$NAME" "${ENV_ARGS[@]}" -- "${SERVER[@]}"
 
+# After a .planka -> .env migration, the health check of the OLD registration ("claude mcp get" above) starts
+# the old "docker run -v <repo>/.planka:..." and Docker creates the missing mount source as an empty directory.
+if [[ -d "$ROOT/.planka" && -z "$(ls -A "$ROOT/.planka")" ]]; then
+  echo "Removing empty $ROOT/.planka (created by Docker for the old registration)"; run rmdir "$ROOT/.planka"
+fi
+
 if [[ $DRY -eq 0 ]]; then
   claude mcp get "$NAME" | sed 's/^/  /'
   echo

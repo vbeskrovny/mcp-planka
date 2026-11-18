@@ -135,4 +135,43 @@ describe("register.sh (node mode, dry run)", () => {
     expect(again.status, again.stdout + again.stderr).toBe(0);
     expect(again.stdout + again.stderr).not.toMatch(/migrate/i);
   });
+
+  it("removes an empty .planka directory that Docker created for the old registration", () => {
+    const repo = join(tmp, "repo2");
+    for (const d of ["scripts", "dist", "src", "node_modules"]) mkdirSync(join(repo, d), { recursive: true });
+    copyFileSync(SCRIPT, join(repo, "register.sh"));
+    copyFileSync(join(ROOT, "scripts/migrate-config.sh"), join(repo, "scripts/migrate-config.sh"));
+    writeFileSync(join(repo, "dist/index.js"), "");
+    writeFileSync(join(repo, "dist/check.js"), 'console.log("OK: stub");');
+    writeFileSync(join(repo, ".planka"), "URL=https://planka.invalid\nKEY=dummy-key\n");
+    // Fake claude: until "mcp add" ran, "mcp get" health-checks the old registration, which (like Docker with the
+    // old -v .planka mount) creates .planka/. After "mcp add" the new registration mounts .env instead.
+    const bin2 = join(tmp, "bin2");
+    const added = join(tmp, "bin2-added");
+    mkdirSync(bin2);
+    writeFileSync(
+      join(bin2, "claude"),
+      `#!/bin/sh\nif [ "$2" = get ]; then [ -f ${added} ] || mkdir -p ${repo}/.planka; echo "Scope: User config"; exit 0; fi\n` +
+        `[ "$2" = add ] && touch ${added}\nexit 0\n`,
+    );
+    chmodSync(join(bin2, "claude"), 0o755);
+    const base = { ...process.env };
+    delete base.PLANKA_FILES_DIR;
+    const r = spawnSync("bash", [join(repo, "register.sh"), "--mode", "node", "--yes"], {
+      env: { ...base, PATH: `${bin2}:${process.env.PATH}` }, cwd: tmp, encoding: "utf8",
+    });
+    expect(r.status, r.stdout + r.stderr).toBe(0);
+    expect(r.stdout).toMatch(/Removing empty .*\.planka \(created by Docker/);
+    expect(existsSync(join(repo, ".planka"))).toBe(false);
+    expect(existsSync(join(repo, ".env"))).toBe(true);
+    // A non-empty .planka directory is left alone.
+    rmSync(added, { force: true });
+    mkdirSync(join(repo, ".planka"), { recursive: true });
+    writeFileSync(join(repo, ".planka/keep"), "x");
+    const again = spawnSync("bash", [join(repo, "register.sh"), "--mode", "node", "--yes"], {
+      env: { ...base, PATH: `${bin2}:${process.env.PATH}` }, cwd: tmp, encoding: "utf8",
+    });
+    expect(again.status, again.stdout + again.stderr).toBe(0);
+    expect(existsSync(join(repo, ".planka/keep"))).toBe(true);
+  });
 });
